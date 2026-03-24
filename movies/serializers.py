@@ -9,6 +9,11 @@ class GenreSerializer(serializers.ModelSerializer):
 
 
 class MovieSerializer(serializers.ModelSerializer):
+    genres = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field="name"
+    )
     class Meta:
         model = Movie
         fields = ['title', 'description', 'release_year', 'genres']
