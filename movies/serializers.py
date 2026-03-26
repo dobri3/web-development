@@ -5,15 +5,19 @@ from .models import Movie, Genre, Watchlist
 class GenreSerializer(serializers.ModelSerializer):
     class Meta:
         model = Genre
-        fields = ['id', 'name']
-        read_only_fields = ['id']
+        fields = ["name"]
 
 
 class MovieSerializer(serializers.ModelSerializer):
+    genres = serializers.SlugRelatedField(
+        many=True,
+        read_only=True,
+        slug_field="name"
+    )
     class Meta:
         model = Movie
-        fields = ['id', 'title', 'description', 'release_year', 'genres']
-        read_only_fields = ['id']
+        fields = ['title', 'description', 'release_year', 'genres']
+        read_only_fields = ['release_year']
 
 
 
@@ -23,5 +27,5 @@ class WatchlistSerializer(serializers.ModelSerializer):
     """Надо будет подкорректировать обращение к имени пользователя, когда создадим класс пользователя"""
     class Meta:
         model = Watchlist
-        fields = ['id', 'user', 'movie', 'added_at']
-        read_only_fields = ['id', 'user', 'added_at']
+        fields = ['user', 'movie', 'added_at']
+        read_only_fields = ['user', 'added_at']
