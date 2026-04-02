@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Movie, Genre, Watchlist
+from ..domain.models import Movie, Genre, Watchlist
 
 
 class GenreSerializer(serializers.ModelSerializer):
