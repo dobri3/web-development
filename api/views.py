@@ -1,5 +1,5 @@
 from rest_framework import mixins, viewsets, permissions, filters
-from ..domain.models import Movie, Watchlist
+from domain.models import Movie, Watchlist
 from .serializers import MovieSerializer, WatchlistSerializer
 
 

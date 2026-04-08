@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from ..domain.models import Movie, Genre, Watchlist
+from domain.models import Movie, Genre, Watchlist
 
 
 class GenreSerializer(serializers.ModelSerializer):
@@ -29,3 +29,5 @@ class WatchlistSerializer(serializers.ModelSerializer):
         model = Watchlist
         fields = ['user', 'movie', 'added_at']
         read_only_fields = ['user', 'added_at']
+
+
