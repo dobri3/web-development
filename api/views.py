@@ -1,5 +1,8 @@
-from rest_framework import mixins, viewsets, permissions, filters
+from rest_framework import mixins, viewsets, permissions, filters, status
+from rest_framework.response import Response
+
 from domain.models import Movie, Watchlist
+from services.watchlist_service import add_to_watchlist, remove_from_watchlist
 from .serializers import MovieSerializer, WatchlistSerializer
 
 
@@ -41,8 +44,30 @@ class WatchlistViewSet(
         return (
             Watchlist.objects
             .filter(user=self.request.user)
+            .select_related("movie")
             .order_by("-added_at")
         )
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        movie = serializer.validated_data["movie"]
+
+        watchlist_item = add_to_watchlist(
+            user=request.user,
+            movie_id=movie.id,
+        )
+
+        output_serializer = self.get_serializer(watchlist_item)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        watchlist_item = self.get_object()
+
+        remove_from_watchlist(
+            user=request.user,
+            movie_id=watchlist_item.movie_id,
+        )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
