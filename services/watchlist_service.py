@@ -1,21 +1,18 @@
 from django.db import transaction
-from rest_framework.exceptions import NotFound, ValidationError
-
 from domain.models import Movie, Watchlist
-
+from domain.exceptions import MovieNotFound, AlreadyInWatchlist, WatchlistItemNotFound
 
 @transaction.atomic
 def add_to_watchlist(user, movie_id: int) -> Watchlist:
     try:
         movie = Movie.objects.get(pk=movie_id)
-    except Movie.DoesNotExist as exc:
-        raise NotFound(detail="Movie not found.") from exc
+    except Movie.DoesNotExist:
+        raise MovieNotFound(movie_id)
 
     if Watchlist.objects.filter(user=user, movie=movie).exists():
-        raise ValidationError({"detail": "Movie is already in watchlist."})
+        raise AlreadyInWatchlist(movie_id, user.username)
 
     return Watchlist.objects.create(user=user, movie=movie)
-
 
 @transaction.atomic
 def remove_from_watchlist(user, movie_id: int) -> None:
@@ -25,4 +22,4 @@ def remove_from_watchlist(user, movie_id: int) -> None:
     ).delete()
 
     if deleted_count == 0:
-        raise NotFound(detail="Movie is not in watchlist.")
+        raise WatchlistItemNotFound(movie_id, user.username)
