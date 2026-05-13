@@ -31,3 +31,10 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+class WatchlistAddRequest(BaseModel):
+    movie_id: int
+
+class WatchlistNotifyRequest(BaseModel):
+    user_id: int
+    movie_id: int
