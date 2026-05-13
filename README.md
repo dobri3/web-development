@@ -15,30 +15,13 @@
 Введён модуль `services/watchlist_service.py`, который инкапсулирует всю бизнес-логику работы с вишлистом. ViewSet-ы теперь только принимают запрос и делегируют выполнение сервису — никакой логики на уровне HTTP.
 
 **`add_to_watchlist(user, movie_id)`** — добавляет фильм в вишлист пользователя:
-- проверяет существование фильма → `MovieNotFound`
-- проверяет отсутствие дубликата → `AlreadyInWatchlist`
+- проверяет существование фильма -> `MovieNotFound`
+- проверяет отсутствие дубликата -> `AlreadyInWatchlist`
 - создаёт запись в транзакции
 
 **`remove_from_watchlist(user, movie_id)`** — удаляет фильм из вишлиста:
-- если запись не найдена → `WatchlistItemNotFound`
+- если запись не найдена -> `WatchlistItemNotFound`
 
-```python
-# До (Sprint 1): логика в ViewSet
-def create(self, request, *args, **kwargs):
-    movie = Movie.objects.get(pk=request.data["movie"])
-    if Watchlist.objects.filter(user=request.user, movie=movie).exists():
-        return Response({"error": "already exists"}, status=409)
-    item = Watchlist.objects.create(user=request.user, movie=movie)
-    ...
-
-# После (Sprint 2): ViewSet вызывает сервис
-def create(self, request, *args, **kwargs):
-    serializer = self.get_serializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    movie = serializer.validated_data["movie"]
-    watchlist_item = add_to_watchlist(user=request.user, movie_id=movie.id)
-    ...
-```
 
 ---
 
@@ -61,7 +44,7 @@ def create(self, request, *args, **kwargs):
 
 ### 3. Единый обработчик ошибок (`api/exception_handler.py`)
 
-Кастомный `exception_handler` перехватывает все `DomainError` и переводит их в HTTP-ответ единого формата. Подключён в `settings.py` через `REST_FRAMEWORK['EXCEPTION_HANDLER']`.
+Кастомный exception_handler перехватывает все DomainError и переводит их в HTTP-ответ единого формата. Подключён в settings.py через REST_FRAMEWORK[EXCEPTION_HANDLER].
 
 **Формат ответа при ошибке:**
 ```json
@@ -79,24 +62,18 @@ def create(self, request, *args, **kwargs):
 
 ViewSet-ы освобождены от бизнес-логики. Сериализаторы остались на уровне валидации входных данных — они не знают о доменных правилах.
 
-```
-Запрос → Serializer.is_valid() → service() → Response
-                                     ↓
-                              DomainError → exception_handler → Response с error_code
-```
-
 ---
 
 ### 5. Конфигурация через окружение (`cinema_project/settings.py`)
 
 Все чувствительные и среда-зависимые параметры вынесены в `.env`. Настройки читаются через `python-dotenv` и `dj-database-url`.
 
-```python
+
 SECRET_KEY    = os.getenv('SECRET_KEY')
 DEBUG         = os.getenv('DEBUG')
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS').split(',')
 DATABASE_URL  = os.getenv('DATABASE_URL')  # → dj_database_url.parse(...)
-```
+
 
 Файл `.env.example` содержит все необходимые переменные без секретных значений и добавлен в репозиторий.
 
@@ -106,16 +83,8 @@ DATABASE_URL  = os.getenv('DATABASE_URL')  # → dj_database_url.parse(...)
 
 Тесты проверяют бизнес-логику напрямую, без HTTP-запросов. Используют `django.test.TestCase` и работают с реальной тестовой БД.
 
-```bash
 python manage.py test services
-```
 
-| Тест                                | Что проверяет                                      |
-|-------------------------------------|----------------------------------------------------|
-| `test_add_to_watchlist_success`     | Фильм успешно добавляется, объект возвращается     |
-| `test_add_duplicate_raises_error`   | Повторное добавление поднимает `AlreadyInWatchlist`|
-| `test_add_nonexistent_movie_raises_error` | Несуществующий id поднимает `MovieNotFound`  |
-| `test_remove_from_watchlist_success`| Фильм удаляется, запись исчезает из БД             |
 
 ---
 
