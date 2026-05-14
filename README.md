@@ -1,123 +1,111 @@
-# web-development
-
-# Sprint 2 — Сервисный слой и единый формат ошибок
+# Sprint 3 — FastAPI сервис, async-эндпоинты и JWT-авторизация
 
 ## Цель спринта
 
-Отделить бизнес-логику от HTTP-слоя, ввести сервисный слой и подготовить кодовую базу к расширению.
+Добавить отдельный FastAPI микросервис, внедрить async-эндпоинты, JWT-авторизацию и фоновые задачи, настроить интеграцию между Django и FastAPI.
 
 ---
 
 ## Что было сделано
 
-### 1. Сервисный слой (`services/`)
+### 1. FastAPI сервис (fastapi_service/)
 
-Введён модуль `services/watchlist_service.py`, который инкапсулирует всю бизнес-логику работы с вишлистом. ViewSet-ы теперь только принимают запрос и делегируют выполнение сервису — никакой логики на уровне HTTP.
+Создан отдельный сервис в папке fastapi_service/ — независимый процесс, запускается на порту 8001. Не является частью Django-проекта. Имеет собственные зависимости, конфигурацию и точку входа main.py.
 
-**`add_to_watchlist(user, movie_id)`** — добавляет фильм в вишлист пользователя:
-- проверяет существование фильма -> `MovieNotFound`
-- проверяет отсутствие дубликата -> `AlreadyInWatchlist`
-- создаёт запись в транзакции
-
-**`remove_from_watchlist(user, movie_id)`** — удаляет фильм из вишлиста:
-- если запись не найдена -> `WatchlistItemNotFound`
-
+Сервис предоставляет автоматическую OpenAPI документацию по адресу /docs — без дополнительной настройки.
 
 ---
 
-### 2. Модуль доменных исключений (`domain/exceptions.py`)
+### 2. JWT-авторизация (fastapi_service/auth.py)
 
-Введена иерархия исключений с базовым классом `DomainError`. Каждое исключение несёт в себе `status_code` и `error_code` — HTTP-слой не знает деталей бизнес-логики, только получает готовый код и сообщение.
+Реализована stateless авторизация на основе JWT токенов. Сервер не хранит сессии — при каждом запросе проверяет подпись токена.
 
-| Исключение                 | `error_code`               | HTTP  | Когда возникает                          |
-|----------------------------|----------------------------|-------|------------------------------------------|
-| `MovieNotFound`            | `MOVIE_NOT_FOUND`          | 404   | Фильм с указанным id не существует       |
-| `AlreadyInWatchlist`       | `ALREADY_IN_WATCHLIST`     | 409   | Фильм уже добавлен в вишлист             |
-| `WatchlistItemNotFound`    | `WATCHLIST_ITEM_NOT_FOUND` | 404   | Фильм не найден в вишлисте при удалении  |
-| `WatchlistLimitExceededError` | `WATCHLIST_LIMIT_EXCEEDED` | 400 | Превышен лимит в 100 фильмов             |
-| `InvalidMovieData`         | `INVALID_MOVIE_DATA`       | 400   | Некорректные данные фильма               |
-| `UserNotAuthorized`        | `USER_NOT_AUTHORIZED`      | 401   | Пользователь не авторизован              |
-| `PermissionDenied`         | `PERMISSION_DENIED`        | 403   | Нет прав доступа                         |
-| `GenreNotFoundError`       | `GENRE_NOT_FOUND`          | 404   | Жанр не найден                           |
+Эндпоинты авторизации:
+
+POST /auth/register — регистрация нового пользователя, пароль хранится в виде bcrypt-хэша.
+
+POST /auth/login — вход, возвращает два токена. Access token живёт 30 минут и передаётся при каждом запросе. Refresh token живёт 7 дней и используется только для получения нового access token.
+
+Защита эндпоинтов реализована через механизм Depends — FastAPI автоматически проверяет токен перед выполнением функции и возвращает 401 если токен отсутствует или невалиден.
 
 ---
 
-### 3. Единый обработчик ошибок (`api/exception_handler.py`)
+### 3. Pydantic-схемы (fastapi_service/schemas.py)
 
-Кастомный exception_handler перехватывает все DomainError и переводит их в HTTP-ответ единого формата. Подключён в settings.py через REST_FRAMEWORK[EXCEPTION_HANDLER].
-
-**Формат ответа при ошибке:**
-```json
-{
-  "error": "ALREADY_IN_WATCHLIST",
-  "detail": "Movie with id 3 is already in john's watchlist"
-}
-```
-
-Стандартные ошибки DRF (валидация, 404 от `get_object_or_404`) по-прежнему обрабатываются дефолтным хендлером — кастомный вызывает его первым.
+Все запросы и ответы описаны через Pydantic-модели. FastAPI автоматически валидирует входящие данные и возвращает 422 если структура не соответствует схеме. Схемы также используются для генерации OpenAPI документации.
 
 ---
 
-### 4. Рефакторинг API (`api/views.py`)
+### 4. Async-эндпоинты
 
-ViewSet-ы освобождены от бизнес-логики. Сериализаторы остались на уровне валидации входных данных — они не знают о доменных правилах.
-
----
-
-### 5. Конфигурация через окружение (`cinema_project/settings.py`)
-
-Все чувствительные и среда-зависимые параметры вынесены в `.env`. Настройки читаются через `python-dotenv` и `dj-database-url`.
-
-
-SECRET_KEY    = os.getenv('SECRET_KEY')
-DEBUG         = os.getenv('DEBUG')
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS').split(',')
-DATABASE_URL  = os.getenv('DATABASE_URL')  # → dj_database_url.parse(...)
-
-
-Файл `.env.example` содержит все необходимые переменные без секретных значений и добавлен в репозиторий.
+Эндпоинты написаны через async def. Это позволяет FastAPI обрабатывать другие запросы пока текущий ждёт ответа от базы данных или внешнего сервиса. Блокирующие операции внутри async функций запрещены.
 
 ---
 
-### 6. Unit-тесты на сервисный слой (`services/test.py`)
+### 5. Фоновые задачи (fastapi_service/tasks.py)
 
-Тесты проверяют бизнес-логику напрямую, без HTTP-запросов. Используют `django.test.TestCase` и работают с реальной тестовой БД.
+POST /watchlist/ принимает запрос и немедленно возвращает ответ. После этого FastAPI запускает фоновую задачу notify_user — имитацию отправки уведомления. Пользователь не ждёт выполнения задачи.
 
-python manage.py test services
+---
 
+### 6. Логирование
+
+Настроен стандартный Python logging с единым форматом во всех модулях. Логируются ключевые события: регистрация и вход пользователя, неудачные попытки входа, добавление в вотчлист, старт и завершение фоновой задачи.
+
+Формат записи:
+
+17:32:01 [INFO] routers.auth_router: Пользователь вошёл: test@test.com
+
+---
+
+### 7. Интеграция Django — FastAPI (services/watchlist_service.py)
+
+При добавлении фильма в вотчлист через Django, сервис отправляет HTTP-запрос к FastAPI эндпоинту /watchlist/notify. Вызов обёрнут в try/except с таймаутом 2 секунды — если FastAPI недоступен, Django продолжает работу и пишет предупреждение в лог. URL FastAPI сервиса вынесен в .env.
 
 ---
 
 ## Структура изменений
 
 ```
-+ services/
-+     __init__.py
-+     watchlist_service.py   # новый: бизнес-логика вишлиста
-+     test.py                # новый: unit-тесты сервисов
-+ domain/
-+     exceptions.py          # новый: иерархия доменных исключений
-~ domain/
-~     models.py              # без изменений
-+ api/
-+     exception_handler.py   # новый: кастомный обработчик ошибок
-~ api/
-~     views.py               # рефакторинг: логика делегирована сервисам
-~     serializers.py         # без изменений
-~ cinema_project/
-~     settings.py            # добавлен EXCEPTION_HANDLER, конфиг через .env
-+ .env.example               # новый: шаблон переменных окружения
++ fastapi_service/
++     main.py                 — точка входа, настройка логирования
++     auth.py                 — JWT логика, хэширование паролей, get_current_user
++     config.py               — чтение переменных из .env
++     database.py             — in-memory хранилище пользователей
++     schemas.py              — Pydantic схемы запросов и ответов
++     tasks.py                — фоновая задача notify_user
++     .env                    — секреты FastAPI сервиса
++     requirements.txt        — зависимости FastAPI сервиса
++     routers/
++         auth_router.py      — эндпоинты /auth/register и /auth/login
++         watchlist_router.py — эндпоинты /watchlist/ и /watchlist/notify
+~ services/
+~     watchlist_service.py    — добавлен HTTP-вызов к FastAPI после add_to_watchlist
+~ .env                        — добавлена переменная FASTAPI_SERVICE_URL
 ```
 
-## как запустить проект
-1. создать `.env`-файл в корне проекта с содержанием файла `.env.example`
-2. поменять в нем `SECRET_KEY` на настоящий
-3. создать и применить миграции к базе данных:
+---
+
+## Как запустить проект
+
+Запускать нужно два сервера одновременно в разных терминалах.
+
+Терминал 1 — FastAPI:
+
 ```
-python manage.py makemigrations
+cd fastapi_service
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8001
+```
+
+Терминал 2 — Django:
+
+```
+pip install -r requirements.txt
 python manage.py migrate
-```
-4. запустить сервер
-```
 python manage.py runserver
 ```
+
+FastAPI документация доступна по адресу http://localhost:8001/docs
+
+Django API доступно по адресу http://localhost:8000/api/
