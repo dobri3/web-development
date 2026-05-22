@@ -1,17 +1,120 @@
 import os
-from flask import Flask, jsonify
+from datetime import datetime, timezone
+
 from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import CheckConstraint
+
+from .validation import validate_ugc_payload, validate_movie_id_query
 
 load_dotenv()
 
-app = Flask(__name__)
+db = SQLAlchemy()
 
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok"})
+class UGC(db.Model):
+    __tablename__ = "ugc"
+
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(20), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    rating = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    movie_id = db.Column(db.Integer, nullable=False, index=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('review', 'comment', 'rating')",
+            name="check_ugc_type",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'hidden', 'pending')",
+            name="check_ugc_status",
+        ),
+        CheckConstraint("rating >= 1 AND rating <= 10", name="check_ugc_rating"),
+    )
+
+    def to_dict(self) -> dict:
+        created_at = self.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
+        return {
+            "id": self.id,
+            "type": self.type,
+            "text": self.text,
+            "rating": self.rating,
+            "status": self.status,
+            "movie_id": self.movie_id,
+            "created_at": created_at.isoformat().replace("+00:00", "Z"),
+        }
 
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8002))
-    app.run(host='0.0.0.0', port=port, debug=True)
+def create_app() -> Flask:
+    app = Flask(__name__)
+    app.json.ensure_ascii = False
+    app.config["SQLALCHEMY_DATABASE_URI"] = (
+        os.getenv("FLASK_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or "sqlite:///ugc.sqlite3"
+    )
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+
+    @app.route("/health", methods=["GET"])
+    def health_check():
+        return jsonify({"status": "ok"}), 200
+
+    @app.route("/ugc/", methods=["POST"])
+    def create_ugc():
+        data = request.get_json(silent=True)
+        validated_data, error = validate_ugc_payload(data)
+        if error:
+            return jsonify(error), 400
+
+        ugc = UGC(
+            type=validated_data["type"],
+            text=validated_data["text"],
+            rating=validated_data["rating"],
+            movie_id=validated_data["movie_id"],
+            status="pending",
+        )
+        db.session.add(ugc)
+        db.session.commit()
+
+        return jsonify({"data": ugc.to_dict()}), 201
+
+    @app.route("/ugc/", methods=["GET"])
+    def list_active_ugc():
+        movie_id, error = validate_movie_id_query(request.args.get("movie_id"))
+        if error:
+            return jsonify(error), 400
+
+        ugc_items = (
+            UGC.query.filter_by(movie_id=movie_id, status="active")
+            .order_by(UGC.created_at.desc())
+            .all()
+        )
+
+        return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8002))
+    debug = os.getenv("DEBUG", "true").lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=port, debug=debug)

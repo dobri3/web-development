@@ -43,6 +43,9 @@ def validate_ugc_payload(data: dict):
     if movie_id is None:
         return None, validation_error("movie_id is required")
 
+    if movie_id <= 0:
+        return None, validation_error("movie_id must be a positive number")
+
     if not isinstance(movie_id, int) or isinstance(movie_id, bool):
         return None, validation_error("movie_id must be a number")
 
@@ -54,3 +57,17 @@ def validate_ugc_payload(data: dict):
     }
 
     return validated_data, None
+
+def validate_movie_id_query(raw_movie_id: str | None):
+    if raw_movie_id is None:
+        return None, validation_error("movie_id is required")
+
+    try:
+        movie_id = int(raw_movie_id)
+    except (TypeError, ValueError):
+        return None, validation_error("movie_id must be a number")
+
+    if movie_id <= 0:
+        return None, validation_error("movie_id must be a positive number")
+
+    return movie_id, None
