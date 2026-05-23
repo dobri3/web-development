@@ -1,14 +1,19 @@
 import os
 from datetime import datetime, timezone
-
+import logging
+from integrations import check_movie_exists
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
-
-from .validation import validate_ugc_payload, validate_movie_id_query
+from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
 
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
 
 db = SQLAlchemy()
 
@@ -29,14 +34,8 @@ class UGC(db.Model):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "type IN ('review', 'comment', 'rating')",
-            name="check_ugc_type",
-        ),
-        CheckConstraint(
-            "status IN ('active', 'hidden', 'pending')",
-            name="check_ugc_status",
-        ),
+        CheckConstraint("type IN ('review', 'comment', 'rating')", name="check_ugc_type"),
+        CheckConstraint("status IN ('active', 'hidden', 'pending')", name="check_ugc_status"),
         CheckConstraint("rating >= 1 AND rating <= 10", name="check_ugc_rating"),
     )
 
@@ -44,7 +43,6 @@ class UGC(db.Model):
         created_at = self.created_at
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
-
         return {
             "id": self.id,
             "type": self.type,
@@ -82,6 +80,13 @@ def create_app() -> Flask:
         if error:
             return jsonify(error), 400
 
+        exists, django_available = check_movie_exists(validated_data["movie_id"])
+        if django_available and not exists:
+            return jsonify({
+                "error": "MOVIE_NOT_FOUND",
+                "detail": f"Movie with id {validated_data['movie_id']} not found"
+            }), 404
+
         ugc = UGC(
             type=validated_data["type"],
             text=validated_data["text"],
@@ -91,7 +96,6 @@ def create_app() -> Flask:
         )
         db.session.add(ugc)
         db.session.commit()
-
         return jsonify({"data": ugc.to_dict()}), 201
 
     @app.route("/ugc/", methods=["GET"])
@@ -105,14 +109,27 @@ def create_app() -> Flask:
             .order_by(UGC.created_at.desc())
             .all()
         )
-
         return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
+
+    @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
+    def update_ugc_status(ugc_id):
+        ugc = db.session.get(UGC, ugc_id)
+        if ugc is None:
+            return jsonify({"error": "NOT_FOUND", "detail": f"UGC with id {ugc_id} not found"}), 404
+
+        data = request.get_json(silent=True)
+        status, error = validate_status_payload(data)
+        if error:
+            return jsonify(error), 400
+
+        ugc.status = status
+        db.session.commit()
+        return jsonify({"data": ugc.to_dict()}), 200
 
     return app
 
 
 app = create_app()
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8002))

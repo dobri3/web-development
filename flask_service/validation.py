@@ -71,3 +71,19 @@ def validate_movie_id_query(raw_movie_id: str | None):
         return None, validation_error("movie_id must be a positive number")
 
     return movie_id, None
+
+ALLOWED_STATUSES = {"active", "hidden", "pending"}
+
+def validate_status_payload(data):
+    if not isinstance(data, dict):
+        return None, validation_error("request body must be a JSON object")
+
+    status = data.get("status")
+
+    if not status or not isinstance(status, str):
+        return None, validation_error("status is required")
+
+    if status not in ALLOWED_STATUSES:
+        return None, validation_error("status must be one of: active, hidden, pending")
+
+    return status, None
