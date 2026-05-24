@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from domain.models import Movie, Watchlist
 from services.watchlist_service import add_to_watchlist, remove_from_watchlist
 from .serializers import MovieSerializer, WatchlistSerializer
+from services.movie_service import get_movies
 
 
 class MovieViewSet(viewsets.ReadOnlyModelViewSet):
@@ -17,7 +18,7 @@ class MovieViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ["title"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = get_movies(self.request.query_params)
 
         genre = self.request.query_params.get("genre")
         release_year = self.request.query_params.get("release_year")

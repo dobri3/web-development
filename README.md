@@ -8,6 +8,20 @@
 
 ## Что было сделано
 
+### Architecture
+
+domain/
+    models
+    exceptions
+
+services/
+    business logic
+
+api/
+    serializers
+    views
+    endpoints
+
 ### 1. FastAPI сервис (fastapi_service/)
 
 Создан отдельный сервис в папке fastapi_service/ — независимый процесс, запускается на порту 8001. Не является частью Django-проекта. Имеет собственные зависимости, конфигурацию и точку входа main.py.
