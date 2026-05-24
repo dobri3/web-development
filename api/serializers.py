@@ -27,7 +27,7 @@ class WatchlistSerializer(serializers.ModelSerializer):
     """Надо будет подкорректировать обращение к имени пользователя, когда создадим класс пользователя"""
     class Meta:
         model = Watchlist
-        fields = ['user', 'movie', 'added_at']
+        fields = ['id', 'user', 'movie', 'added_at']
         read_only_fields = ['user', 'added_at']
 
 

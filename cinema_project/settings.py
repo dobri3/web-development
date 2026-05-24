@@ -22,9 +22,23 @@ load_dotenv()
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = os.getenv('DEBUG')
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS").split(",") if host.strip()]
-database_url = os.getenv('DATABASE_URL')
+DEBUG = os.getenv("DEBUG", "False") == "True"
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "ALLOWED_HOSTS",
+        "127.0.0.1,localhost"
+    ).split(",")
+    if host.strip()
+]
+database_url = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///db.sqlite3"
+)
+FASTAPI_SERVICE_URL = os.getenv(
+    "FASTAPI_SERVICE_URL",
+    "http://127.0.0.1:8001"
+)
 
 # Application definition
 
