@@ -1,22 +1,41 @@
-# fastapi_service/auth.py
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 from models.user import User
-from django.contrib.auth.hashers import check_password
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 
 oauth2_scheme = HTTPBearer()
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(32)
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        100000
+    )
+    return f"{salt}:{key.hex()}"
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return check_password(plain, hashed)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверка пароля"""
+    try:
+        hash_part, salt = hashed_password.split(':')
+        new_key = hashlib.pbkdf2_hmac(
+            'sha256',
+            plain_password.encode('utf-8'),
+            salt.encode('utf-8'),
+            100000
+        )
+        return new_key.hex() == hash_part
+    except Exception as e:
+        print(f"DEBUG verify error: {e}")
+        return False
 
 def create_token(data: dict, expires_delta: timedelta) -> str:
     payload = data.copy()
@@ -47,14 +66,13 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> User:
-
     credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Невалидный или просроченный токен",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        token = credentials.credentials  # вытаскиваем токен из объекта
+        token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         token_type: str = payload.get("type")

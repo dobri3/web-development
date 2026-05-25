@@ -1,3 +1,4 @@
+# auth_router.py
 from fastapi import (
     APIRouter,
     HTTPException,
@@ -8,8 +9,6 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from django.contrib.auth.hashers import make_password
-
 from schemas import (
     RegisterRequest,
     LoginRequest,
@@ -19,7 +18,9 @@ from schemas import (
 from auth import (
     verify_password,
     create_access_token,
-    create_refresh_token
+    create_refresh_token,
+    get_current_user,
+    hash_password
 )
 
 from database import get_db
@@ -51,12 +52,12 @@ async def register(
     new_user = User(
         username=data.email,
         email=data.email,
-        password=make_password(data.password)
+        password=hash_password(data.password)
     )
 
     db.add(new_user)
-
     await db.commit()
+    await db.refresh(new_user)
 
     logger.info(f"Новый пользователь зарегистрирован: {data.email}")
     return {"message": "Регистрация успешна"}
@@ -85,3 +86,14 @@ async def login(
         access_token=create_access_token(user),
         refresh_token=create_refresh_token(user)
     )
+
+
+@router.get("/me")
+async def me(
+    current_user: User = Depends(get_current_user)
+):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "username": current_user.username
+    }
