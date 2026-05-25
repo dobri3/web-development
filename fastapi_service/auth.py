@@ -1,7 +1,6 @@
-import hashlib
-import secrets
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
+from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
@@ -10,32 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = HTTPBearer()
 
-def hash_password(password: str) -> str:
-    salt = secrets.token_hex(32)
-    key = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000
-    )
-    return f"{salt}:{key.hex()}"
+def verify_password(plain: str, hashed: str) -> bool:
+    if len(plain) > 72:
+        plain = plain[:72]
+    return pwd_context.verify(plain, hashed)
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверка пароля"""
-    try:
-        hash_part, salt = hashed_password.split(':')
-        new_key = hashlib.pbkdf2_hmac(
-            'sha256',
-            plain_password.encode('utf-8'),
-            salt.encode('utf-8'),
-            100000
-        )
-        return new_key.hex() == hash_part
-    except Exception as e:
-        print(f"DEBUG verify error: {e}")
-        return False
+def hash_password(password: str) -> str:
+    if len(password) > 72:
+        password = password[:72]
+    return pwd_context.hash(password)
 
 def create_token(data: dict, expires_delta: timedelta) -> str:
     payload = data.copy()

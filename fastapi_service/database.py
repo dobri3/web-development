@@ -1,9 +1,8 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
+from config import DATABASE_URL
 
-DATABASE_URL = "postgresql+asyncpg://scenar_user:scenar_password@localhost:5433/scenar_db"
-
-engine = create_async_engine(DATABASE_URL)
+engine = create_async_engine(DATABASE_URL, echo=True)
 
 async_session = async_sessionmaker(
     engine,
@@ -12,7 +11,6 @@ async_session = async_sessionmaker(
 )
 
 Base = declarative_base()
-
 
 async def get_db():
     async with async_session() as session:
