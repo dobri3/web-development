@@ -25,8 +25,8 @@ class UGC(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     type = db.Column(db.String(20), nullable=False)
-    text = db.Column(db.Text, nullable=False)
-    rating = db.Column(db.Float, nullable=False)
+    text = db.Column(db.Text)
+    rating = db.Column(db.Float)
     status = db.Column(db.String(20), nullable=False, default="pending")
     movie_id = db.Column(db.Integer, nullable=False, index=True)
     user_id = db.Column(db.Integer, nullable=False, index=True)
@@ -39,7 +39,7 @@ class UGC(db.Model):
     __table_args__ = (
         CheckConstraint("type IN ('review', 'comment', 'rating')", name="check_ugc_type"),
         CheckConstraint("status IN ('active', 'hidden', 'pending')", name="check_ugc_status"),
-        CheckConstraint("rating >= 1 AND rating <= 10", name="check_ugc_rating"),
+        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 10)", name="check_ugc_rating"),
     )
 
     def to_dict(self) -> dict:
