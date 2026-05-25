@@ -2,11 +2,34 @@ from fastapi import APIRouter, HTTPException, status
 from schemas import RegisterRequest, LoginRequest, TokenResponse
 from auth import hash_password, verify_password, create_access_token, create_refresh_token
 from database import fake_users_db, get_next_user_id
+import os
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
 
+def get_role_for_email(email: str) -> str:
+    user_email = email.strip().lower()
+
+    admin_emails = {
+        item.strip().lower()
+        for item in os.getenv("ADMIN_EMAILS", "").split(",")
+        if item.strip()
+    }
+
+    moderator_emails = {
+        item.strip().lower()
+        for item in os.getenv("MODERATOR_EMAILS", "").split(",")
+        if item.strip()
+    }
+
+    if user_email in admin_emails:
+        return "admin"
+
+    if user_email in moderator_emails:
+        return "moderator"
+
+    return "user"
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(data: RegisterRequest):
@@ -16,9 +39,12 @@ async def register(data: RegisterRequest):
             detail="Пользователь с таким email уже существует"
         )
 
+    role = get_role_for_email(data.email)
+
     fake_users_db[data.email] = {
         "id": get_next_user_id(),
         "email": data.email,
+        "role": role,
         "hashed_password": hash_password(data.password)
     }
 
@@ -39,6 +65,6 @@ async def login(data: LoginRequest):
 
     logger.info(f"Пользователь вошёл: {data.email}")
     return TokenResponse(
-        access_token=create_access_token(data.email, user["id"]),
-        refresh_token=create_refresh_token(data.email, user["id"])
+        access_token=create_access_token(data.email, user["id"], user.get("role", "user")),
+        refresh_token=create_refresh_token(data.email, user["id"], user.get("role", "user"))
     )

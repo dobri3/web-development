@@ -8,6 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
 from auth import jwt_required
+from permissions import roles_required
 
 load_dotenv()
 logging.basicConfig(
@@ -117,6 +118,8 @@ def create_app() -> Flask:
         return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
 
     @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
+    @jwt_required
+    @roles_required("admin", "moderator")
     def update_ugc_status(ugc_id):
         ugc = db.session.get(UGC, ugc_id)
         if ugc is None:
@@ -130,6 +133,32 @@ def create_app() -> Flask:
         ugc.status = status
         db.session.commit()
         return jsonify({"data": ugc.to_dict()}), 200
+
+    @app.route("/ugc/<int:ugc_id>/hide", methods=["PATCH"])
+    @jwt_required
+    def hide_own_ugc(ugc_id):
+        ugc = UGC.query.get(ugc_id)
+
+        if ugc is None:
+            return jsonify({
+                "error": "UGC_NOT_FOUND",
+                "detail": "UGC item not found",
+            }), 404
+
+        current_user_id = g.current_user["id"]
+
+        if ugc.user_id != current_user_id:
+            return jsonify({
+                "error": "FORBIDDEN",
+                "detail": "You can hide only your own UGC",
+            }), 403
+
+        ugc.status = "hidden"
+        db.session.commit()
+
+        return jsonify({
+            "data": ugc.to_dict()
+        })
 
     return app
 
