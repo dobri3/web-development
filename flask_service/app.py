@@ -1,14 +1,15 @@
 import os
 from datetime import datetime, timezone
 import logging
-from integrations import check_movie_exists
+from flask_migrate import Migrate
+from .integrations import check_movie_exists
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
-from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
-from auth import jwt_required
-from permissions import roles_required
+from .validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from .auth import jwt_required
+from .permissions import roles_required
 
 load_dotenv()
 logging.basicConfig(
@@ -18,6 +19,7 @@ logging.basicConfig(
 )
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 
 class UGC(db.Model):
@@ -60,7 +62,9 @@ class UGC(db.Model):
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
     app.json.ensure_ascii = False
+
     app.config["SQLALCHEMY_DATABASE_URI"] = (
         os.getenv("FLASK_DATABASE_URL")
         or os.getenv("DATABASE_URL")
@@ -69,9 +73,8 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        db.create_all()
 
     @app.route("/health", methods=["GET"])
     def health_check():
@@ -93,7 +96,7 @@ def create_app() -> Flask:
                 "detail": "Cannot verify movie existence. Try again later.",
             }), 503
 
-        if django_available:
+        if not exists:
             return jsonify({
                 "error": "MOVIE_NOT_FOUND",
                 "detail": f"Movie with id {validated_data['movie_id']} not found"

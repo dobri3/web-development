@@ -1,7 +1,7 @@
 from functools import wraps
-from flask import jsonify, request, g
+from flask import jsonify, g
 
-from auth import auth_error
+from .auth import auth_error
 
 
 def permission_error(detail: str, status_code: int = 403):
