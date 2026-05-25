@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from schemas import RegisterRequest, LoginRequest, TokenResponse
 from auth import hash_password, verify_password, create_access_token, create_refresh_token
-from database import fake_users_db
+from database import fake_users_db, get_next_user_id
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -17,6 +17,7 @@ async def register(data: RegisterRequest):
         )
 
     fake_users_db[data.email] = {
+        "id": get_next_user_id(),
         "email": data.email,
         "hashed_password": hash_password(data.password)
     }
@@ -38,6 +39,6 @@ async def login(data: LoginRequest):
 
     logger.info(f"Пользователь вошёл: {data.email}")
     return TokenResponse(
-        access_token=create_access_token(data.email),
-        refresh_token=create_refresh_token(data.email)
+        access_token=create_access_token(data.email, user["id"]),
+        refresh_token=create_refresh_token(data.email, user["id"])
     )

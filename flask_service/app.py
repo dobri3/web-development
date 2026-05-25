@@ -3,10 +3,11 @@ from datetime import datetime, timezone
 import logging
 from integrations import check_movie_exists
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from auth import jwt_required
 
 load_dotenv()
 logging.basicConfig(
@@ -27,6 +28,7 @@ class UGC(db.Model):
     rating = db.Column(db.Float, nullable=False)
     status = db.Column(db.String(20), nullable=False, default="pending")
     movie_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -50,6 +52,7 @@ class UGC(db.Model):
             "rating": self.rating,
             "status": self.status,
             "movie_id": self.movie_id,
+            "user_id": self.user_id,
             "created_at": created_at.isoformat().replace("+00:00", "Z"),
         }
 
@@ -74,6 +77,7 @@ def create_app() -> Flask:
         return jsonify({"status": "ok"}), 200
 
     @app.route("/ugc/", methods=["POST"])
+    @jwt_required
     def create_ugc():
         data = request.get_json(silent=True)
         validated_data, error = validate_ugc_payload(data)
@@ -92,6 +96,7 @@ def create_app() -> Flask:
             text=validated_data["text"],
             rating=validated_data["rating"],
             movie_id=validated_data["movie_id"],
+            user_id=g.current_user["id"],
             status="pending",
         )
         db.session.add(ugc)
