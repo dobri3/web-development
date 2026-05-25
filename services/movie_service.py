@@ -1,10 +1,10 @@
+from domain.exceptions import MovieNotFound
 from domain.models import Movie
-from django.shortcuts import get_object_or_404
 
 
 def get_movies(query_params=None):
     query_params = query_params or {}
-    
+
     queryset = Movie.objects.all()
 
     genre = query_params.get("genre")
@@ -20,8 +20,7 @@ def get_movies(query_params=None):
 
 
 def get_movie(movie_id):
-
-    return get_object_or_404(
-        Movie,
-        pk=movie_id
-    )
+    try:
+        return Movie.objects.get(pk=movie_id)
+    except Movie.DoesNotExist:
+        raise MovieNotFound(movie_id)

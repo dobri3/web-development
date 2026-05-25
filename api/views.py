@@ -1,18 +1,24 @@
 from rest_framework import mixins, viewsets, permissions, filters, status, generics
 from rest_framework.response import Response
 
-from domain.models import Movie, Watchlist, Subscription
+from rest_framework.decorators import action
+
+from domain.models import Movie, Watchlist
 from services.watchlist_service import add_to_watchlist, remove_from_watchlist
-from services.subscription_service import get_user_subscription
 from .serializers import (
     MovieSerializer,
     MovieFilterSerializer,
     WatchlistSerializer, 
     SubscriptionSerializer,
 )
-from services.movie_service import get_movies
+from services.movie_service import get_movie, get_movies
 
-from django.shortcuts import get_object_or_404
+from services.subscription_service import (
+    create_or_extend_subscription,
+    cancel_subscription,
+    get_user_active_subscription,
+    get_user_subscription,
+)
 
 class MovieViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Movie.objects.all().order_by("id")
@@ -31,6 +37,11 @@ class MovieViewSet(viewsets.ReadOnlyModelViewSet):
 
         return get_movies(serializer.validated_data)
 
+    def retrieve(self, request, *args, **kwargs):
+        movie = get_movie(kwargs["pk"])
+
+        serializer = self.get_serializer(movie)
+        return Response(serializer.data)
 
 class WatchlistViewSet(
     mixins.ListModelMixin,
@@ -76,9 +87,33 @@ class WatchlistViewSet(
 
         return Response(status=status.HTTP_204_NO_CONTENT)
     
-class SubscriptionView(generics.RetrieveAPIView):
+
+class SubscriptionViewSet(viewsets.GenericViewSet):
     serializer_class = SubscriptionSerializer
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_object(self):
-        return get_user_subscription(user=self.request.user)
+    def list(self, request, *args, **kwargs):
+        subscription = get_user_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        subscription = create_or_extend_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def active(self, request, *args, **kwargs):
+        subscription = get_user_active_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["post"])
+    def cancel(self, request, *args, **kwargs):
+        subscription = cancel_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)

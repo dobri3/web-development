@@ -1,34 +1,52 @@
-from domain.models import Subscription
-from django.shortcuts import get_object_or_404
+from datetime import timedelta
+
 from django.utils import timezone
+
+from domain.exceptions import SubscriptionNotFound, ActiveSubscriptionNotFound
+from domain.models import Subscription
 
 
 def get_user_subscription(user):
-
-    return Subscription.objects.filter(
-        user=user,
-        is_active=True,
-        expires_at__gt=timezone.now()
-    ).first()
+    try:
+        return Subscription.objects.get(user=user)
+    except Subscription.DoesNotExist:
+        raise SubscriptionNotFound(user.username)
 
 
-def create_subscription(user, expires_at):
+def get_user_active_subscription(user):
+    subscription = get_user_subscription(user)
 
-    return Subscription.objects.create(
-        user=user,
-        expires_at=expires_at,
-        is_active=True
-    )
+    if subscription.expires_at > timezone.now():
+        return subscription
+
+    raise ActiveSubscriptionNotFound(user.username)
 
 
-def deactivate_subscription(subscription_id):
+def create_or_extend_subscription(user, duration_days=30):
+    now = timezone.now()
 
-    subscription = get_object_or_404(
-        Subscription,
-        pk=subscription_id
-    )
+    subscription = Subscription.objects.filter(user=user).first()
 
-    subscription.is_active = False
-    subscription.save()
+    if subscription is None:
+        return Subscription.objects.create(
+            user=user,
+            expires_at=now + timedelta(days=duration_days),
+        )
+
+    if subscription.expires_at > now:
+        subscription.expires_at += timedelta(days=duration_days)
+    else:
+        subscription.expires_at = now + timedelta(days=duration_days)
+
+    subscription.save(update_fields=["expires_at"])
+
+    return subscription
+
+
+def cancel_subscription(user):
+    subscription = get_user_subscription(user)
+
+    subscription.expires_at = timezone.now()
+    subscription.save(update_fields=["expires_at"])
 
     return subscription

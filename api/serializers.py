@@ -36,5 +36,5 @@ class WatchlistSerializer(serializers.ModelSerializer):
 class SubscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subscription
-        fields = ['is_active', 'expires_at']
-        read_only_fields = ['is_active', 'expires_at']
+        fields = ['expires_at']
+        read_only_fields = ['expires_at']
