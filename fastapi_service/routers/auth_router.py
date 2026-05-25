@@ -1,7 +1,30 @@
-from fastapi import APIRouter, HTTPException, status
-from schemas import RegisterRequest, LoginRequest, TokenResponse
-from auth import hash_password, verify_password, create_access_token, create_refresh_token
-from database import fake_users_db
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    status,
+    Depends
+)
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from django.contrib.auth.hashers import make_password
+
+from schemas import (
+    RegisterRequest,
+    LoginRequest,
+    TokenResponse
+)
+
+from auth import (
+    verify_password,
+    create_access_token,
+    create_refresh_token
+)
+
+from database import get_db
+from models.user import User
+
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -9,27 +32,48 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(data: RegisterRequest):
-    if data.email in fake_users_db:
+async def register(
+    data: RegisterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
+
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Пользователь с таким email уже существует"
         )
 
-    fake_users_db[data.email] = {
-        "email": data.email,
-        "hashed_password": hash_password(data.password)
-    }
+    new_user = User(
+        username=data.email,
+        email=data.email,
+        password=make_password(data.password)
+    )
+
+    db.add(new_user)
+
+    await db.commit()
 
     logger.info(f"Новый пользователь зарегистрирован: {data.email}")
     return {"message": "Регистрация успешна"}
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest):
-    user = fake_users_db.get(data.email)
+async def login(
+    data: LoginRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(User).where(User.email == data.email)
+    )
 
-    if not user or not verify_password(data.password, user["hashed_password"]):
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(data.password, user.password):
         logger.warning(f"Неудачная попытка входа: {data.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -38,6 +82,6 @@ async def login(data: LoginRequest):
 
     logger.info(f"Пользователь вошёл: {data.email}")
     return TokenResponse(
-        access_token=create_access_token(data.email),
-        refresh_token=create_refresh_token(data.email)
+        access_token=create_access_token(user),
+        refresh_token=create_refresh_token(user)
     )

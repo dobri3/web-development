@@ -4,6 +4,7 @@ from auth import get_current_user
 from tasks import notify_user
 import logging
 from schemas import WatchlistAddRequest, WatchlistNotifyRequest
+from models.user import User
 
 router = APIRouter(prefix="/watchlist", tags=["Watchlist"])
 logger = logging.getLogger(__name__)
@@ -12,11 +13,11 @@ logger = logging.getLogger(__name__)
 async def add_to_watchlist(
     data: WatchlistAddRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
-    background_tasks.add_task(notify_user, current_user["email"], data.movie_id)
+    background_tasks.add_task(notify_user, current_user.email, data.movie_id)
 
-    logger.info(f"{current_user['email']} добавил фильм {data.movie_id} в вотчлист")
+    logger.info(f"{current_user.email} добавил фильм {data.movie_id} в вотчлист")
     return {"status": "added", "movie_id": data.movie_id}
 
 
