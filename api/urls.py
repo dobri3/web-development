@@ -1,10 +1,11 @@
 from rest_framework.routers import DefaultRouter
-from rest_framework.urls import urlpatterns
-
-from .views import MovieViewSet, WatchlistViewSet
+from django.urls import path
+from .views import MovieViewSet, WatchlistViewSet, SubscriptionView
 
 router = DefaultRouter()
 router.register(r'movies', MovieViewSet, basename='movie')
 router.register(r'watchlist', WatchlistViewSet, basename='watchlist')
 
-urlpatterns = router.urls
+urlpatterns = router.urls + [
+    path("subscription/", SubscriptionView.as_view(), name="subscription"),
+]

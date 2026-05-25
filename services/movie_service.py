@@ -2,20 +2,21 @@ from domain.models import Movie
 from django.shortcuts import get_object_or_404
 
 
-def get_movies(filters=None):
-
+def get_movies(query_params=None):
+    query_params = query_params or {}
+    
     queryset = Movie.objects.all()
 
-    if filters:
+    genre = query_params.get("genre")
+    release_year = query_params.get("release_year")
 
-        title = filters.get("title")
+    if genre:
+        queryset = queryset.filter(genres__name__icontains=genre)
 
-        if title:
-            queryset = queryset.filter(
-                title__icontains=title
-            )
+    if release_year:
+        queryset = queryset.filter(release_year=release_year)
 
-    return queryset
+    return queryset.distinct()
 
 
 def get_movie(movie_id):

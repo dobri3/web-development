@@ -1,35 +1,35 @@
-from rest_framework import mixins, viewsets, permissions, filters, status
+from rest_framework import mixins, viewsets, permissions, filters, status, generics
 from rest_framework.response import Response
 
-from domain.models import Movie, Watchlist
+from domain.models import Movie, Watchlist, Subscription
 from services.watchlist_service import add_to_watchlist, remove_from_watchlist
-from .serializers import MovieSerializer, WatchlistSerializer
+from services.subscription_service import get_user_subscription
+from .serializers import (
+    MovieSerializer,
+    MovieFilterSerializer,
+    WatchlistSerializer, 
+    SubscriptionSerializer,
+)
 from services.movie_service import get_movies
 
+from django.shortcuts import get_object_or_404
 
 class MovieViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Movie.objects.all().order_by("id")
     serializer_class = MovieSerializer
     permission_classes = [permissions.AllowAny]
 
+    # Настройка query_params: ?search= и ?ordering=
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["title", "description", "genres__name"]
     ordering_fields = ["title", "release_year"]
     ordering = ["title"]
 
     def get_queryset(self):
-        queryset = get_movies(self.request.query_params)
+        serializer = MovieFilterSerializer(data=self.request.query_params)
+        serializer.is_valid(raise_exception=True)
 
-        genre = self.request.query_params.get("genre")
-        release_year = self.request.query_params.get("release_year")
-
-        if genre:
-            queryset = queryset.filter(genres__name__icontains=genre)
-
-        if release_year:
-            queryset = queryset.filter(release_year=release_year)
-
-        return queryset.distinct()
+        return get_movies(serializer.validated_data)
 
 
 class WatchlistViewSet(
@@ -41,6 +41,9 @@ class WatchlistViewSet(
     serializer_class = WatchlistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    # queryset состоит из всех объектов watchlist, которыми
+    # обладает автор запроса в порядке, начиная с 
+    # недавно добавленных фильмов
     def get_queryset(self):
         return (
             Watchlist.objects
@@ -72,3 +75,10 @@ class WatchlistViewSet(
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
+class SubscriptionView(generics.RetrieveAPIView):
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        return get_user_subscription(user=self.request.user)
