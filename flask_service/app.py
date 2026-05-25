@@ -86,7 +86,14 @@ def create_app() -> Flask:
             return jsonify(error), 400
 
         exists, django_available = check_movie_exists(validated_data["movie_id"])
-        if django_available and not exists:
+
+        if not django_available:
+            return jsonify({
+                "error": "DJANGO_SERVICE_UNAVAILABLE",
+                "detail": "Cannot verify movie existence. Try again later.",
+            }), 503
+
+        if django_available:
             return jsonify({
                 "error": "MOVIE_NOT_FOUND",
                 "detail": f"Movie with id {validated_data['movie_id']} not found"
