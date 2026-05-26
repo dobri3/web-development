@@ -7,8 +7,12 @@ from jose import JWTError, jwt
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
+def get_jwt_secret_key():
+    return os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
+
+
+def get_jwt_algorithm():
+    return os.getenv("ALGORITHM", "HS256")
 
 
 def auth_error(detail: str, status_code: int = 401):
@@ -19,7 +23,10 @@ def auth_error(detail: str, status_code: int = 401):
 
 
 def get_current_user_from_token():
-    if not SECRET_KEY:
+    secret_key = get_jwt_secret_key()
+    algorithm = get_jwt_algorithm()
+
+    if not secret_key:
         return None, auth_error("JWT secret key is not configured", 500)
 
     auth_header = request.headers.get("Authorization", "")
@@ -36,7 +43,7 @@ def get_current_user_from_token():
         return None, auth_error("Bearer token is empty")
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, secret_key, algorithms=[algorithm])
     except JWTError:
         return None, auth_error("Invalid or expired token")
 

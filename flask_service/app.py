@@ -147,7 +147,7 @@ def create_app() -> Flask:
     @app.route("/ugc/<int:ugc_id>/hide", methods=["PATCH"])
     @jwt_required
     def hide_own_ugc(ugc_id):
-        ugc = UGC.query.get(ugc_id)
+        ugc = db.session.get(UGC, ugc_id)
 
         if ugc is None:
             return jsonify({
