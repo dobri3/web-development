@@ -48,17 +48,6 @@ async def register(
             detail="Пользователь с таким email уже существует"
         )
 
-<<<<<<< HEAD
-    new_user = User(
-        username=data.email,
-        email=data.email,
-        password=make_password(data.password)
-    )
-
-    db.add(new_user)
-
-    await db.commit()
-=======
     role = get_role_for_email(data.email)
 
     fake_users_db[data.email] = {
@@ -67,7 +56,6 @@ async def register(
         "role": role,
         "hashed_password": hash_password(data.password)
     }
->>>>>>> fix/flask
 
     logger.info(f"Новый пользователь зарегистрирован: {data.email}")
     return {"message": "Регистрация успешна"}
@@ -93,11 +81,6 @@ async def login(
 
     logger.info(f"Пользователь вошёл: {data.email}")
     return TokenResponse(
-<<<<<<< HEAD
-        access_token=create_access_token(user),
-        refresh_token=create_refresh_token(user)
-=======
         access_token=create_access_token(data.email, user["id"], user.get("role", "user")),
         refresh_token=create_refresh_token(data.email, user["id"], user.get("role", "user"))
->>>>>>> fix/flask
     )
