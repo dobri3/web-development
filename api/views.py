@@ -4,7 +4,11 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 
 from domain.models import Movie, Watchlist
-from services.watchlist_service import add_to_watchlist, remove_from_watchlist
+from services.watchlist_service import (
+    add_to_watchlist,
+    remove_from_watchlist,
+    get_user_watchlist,
+)
 from .serializers import (
     MovieSerializer,
     MovieFilterSerializer,
@@ -56,11 +60,8 @@ class WatchlistViewSet(
     # обладает автор запроса в порядке, начиная с 
     # недавно добавленных фильмов
     def get_queryset(self):
-        return (
-            Watchlist.objects
-            .filter(user=self.request.user)
-            .select_related("movie")
-            .order_by("-added_at")
+        return get_user_watchlist(
+            self.request.user
         )
 
     def create(self, request, *args, **kwargs):
