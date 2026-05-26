@@ -1,12 +1,15 @@
 import os
 from datetime import datetime, timezone
 import logging
-from integrations import check_movie_exists
+from flask_migrate import Migrate
+from .integrations import check_movie_exists
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
-from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from .validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from .auth import jwt_required
+from .permissions import roles_required
 
 load_dotenv()
 logging.basicConfig(
@@ -16,6 +19,7 @@ logging.basicConfig(
 )
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 
 class UGC(db.Model):
@@ -23,10 +27,11 @@ class UGC(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     type = db.Column(db.String(20), nullable=False)
-    text = db.Column(db.Text, nullable=False)
-    rating = db.Column(db.Float, nullable=False)
+    text = db.Column(db.Text)
+    rating = db.Column(db.Float)
     status = db.Column(db.String(20), nullable=False, default="pending")
     movie_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -36,7 +41,7 @@ class UGC(db.Model):
     __table_args__ = (
         CheckConstraint("type IN ('review', 'comment', 'rating')", name="check_ugc_type"),
         CheckConstraint("status IN ('active', 'hidden', 'pending')", name="check_ugc_status"),
-        CheckConstraint("rating >= 1 AND rating <= 10", name="check_ugc_rating"),
+        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 10)", name="check_ugc_rating"),
     )
 
     def to_dict(self) -> dict:
@@ -50,13 +55,16 @@ class UGC(db.Model):
             "rating": self.rating,
             "status": self.status,
             "movie_id": self.movie_id,
+            "user_id": self.user_id,
             "created_at": created_at.isoformat().replace("+00:00", "Z"),
         }
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
     app.json.ensure_ascii = False
+
     app.config["SQLALCHEMY_DATABASE_URI"] = (
         os.getenv("FLASK_DATABASE_URL")
         or os.getenv("DATABASE_URL")
@@ -65,15 +73,15 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        db.create_all()
 
     @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify({"status": "ok"}), 200
 
     @app.route("/ugc/", methods=["POST"])
+    @jwt_required
     def create_ugc():
         data = request.get_json(silent=True)
         validated_data, error = validate_ugc_payload(data)
@@ -81,7 +89,14 @@ def create_app() -> Flask:
             return jsonify(error), 400
 
         exists, django_available = check_movie_exists(validated_data["movie_id"])
-        if django_available and not exists:
+
+        if not django_available:
+            return jsonify({
+                "error": "DJANGO_SERVICE_UNAVAILABLE",
+                "detail": "Cannot verify movie existence. Try again later.",
+            }), 503
+
+        if not exists:
             return jsonify({
                 "error": "MOVIE_NOT_FOUND",
                 "detail": f"Movie with id {validated_data['movie_id']} not found"
@@ -92,6 +107,7 @@ def create_app() -> Flask:
             text=validated_data["text"],
             rating=validated_data["rating"],
             movie_id=validated_data["movie_id"],
+            user_id=g.current_user["id"],
             status="pending",
         )
         db.session.add(ugc)
@@ -112,6 +128,8 @@ def create_app() -> Flask:
         return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
 
     @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
+    @jwt_required
+    @roles_required("admin", "moderator")
     def update_ugc_status(ugc_id):
         ugc = db.session.get(UGC, ugc_id)
         if ugc is None:
@@ -125,6 +143,32 @@ def create_app() -> Flask:
         ugc.status = status
         db.session.commit()
         return jsonify({"data": ugc.to_dict()}), 200
+
+    @app.route("/ugc/<int:ugc_id>/hide", methods=["PATCH"])
+    @jwt_required
+    def hide_own_ugc(ugc_id):
+        ugc = db.session.get(UGC, ugc_id)
+
+        if ugc is None:
+            return jsonify({
+                "error": "UGC_NOT_FOUND",
+                "detail": "UGC item not found",
+            }), 404
+
+        current_user_id = g.current_user["id"]
+
+        if ugc.user_id != current_user_id:
+            return jsonify({
+                "error": "FORBIDDEN",
+                "detail": "You can hide only your own UGC",
+            }), 403
+
+        ugc.status = "hidden"
+        db.session.commit()
+
+        return jsonify({
+            "data": ugc.to_dict()
+        })
 
     return app
 

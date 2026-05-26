@@ -23,23 +23,15 @@ def create_token(data: dict, expires_delta: timedelta) -> str:
     payload["exp"] = datetime.utcnow() + expires_delta
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def create_access_token(user: User) -> str:
+def create_access_token(email: str, user_id: int, role: str = "user") -> str:
     return create_token(
-        {
-            "sub": str(user.id),
-            "email": user.email,
-            "type": "access"
-        },
+        {"sub": email, "user_id": user_id, "type": "access", "role": role,},
         timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
-def create_refresh_token(user: User) -> str:
+def create_refresh_token(email: str, user_id: int, role: str = "user") -> str:
     return create_token(
-        {
-            "sub": str(user.id),
-            "email": user.email,
-            "type": "refresh"
-        },
+        {"sub": email, "user_id": user_id, "type": "refresh", "role": role,},
         timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     )
 

@@ -1,18 +1,11 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
+fake_users_db: dict = {}
+_next_user_id = 1
 
-DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost/cinema"
 
-engine = create_async_engine(DATABASE_URL)
+def get_next_user_id() -> int:
+    global _next_user_id
 
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+    user_id = _next_user_id
+    _next_user_id += 1
 
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
-
-Base = declarative_base()
+    return user_id
