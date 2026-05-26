@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from domain.exceptions import SubscriptionNotFound, ActiveSubscriptionNotFound
+from domain.exceptions import InvalidSubscriptionDuration, SubscriptionNotFound, ActiveSubscriptionNotFound
 from domain.models import Subscription
 
 
@@ -24,7 +24,8 @@ def get_user_active_subscription(user):
 
 def create_or_extend_subscription(user, duration_days=30):
     now = timezone.now()
-
+    if duration_days <= 0:
+        raise InvalidSubscriptionDuration()
     subscription = Subscription.objects.filter(user=user).first()
 
     if subscription is None:
