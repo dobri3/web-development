@@ -1,14 +1,15 @@
 from functools import wraps
-from flask import jsonify, g
+from flask import g
 
 from .auth import auth_error
-
+from .responses import error_response
 
 def permission_error(detail: str, status_code: int = 403):
-    return jsonify({
-        "error": "FORBIDDEN",
-        "detail": detail,
-    }), status_code
+    return error_response(
+        "FORBIDDEN",
+        detail,
+        status_code,
+    )
 
 
 def roles_required(*allowed_roles):

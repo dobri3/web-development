@@ -2,8 +2,10 @@ import os
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import jsonify, request, g
+from flask import request, g
 from jose import JWTError, jwt
+
+from .responses import error_response
 
 load_dotenv()
 
@@ -16,10 +18,11 @@ def get_jwt_algorithm():
 
 
 def auth_error(detail: str, status_code: int = 401):
-    return jsonify({
-        "error": "AUTHENTICATION_FAILED",
-        "detail": detail,
-    }), status_code
+    return error_response(
+        "AUTHENTICATION_FAILED",
+        detail,
+        status_code,
+    )
 
 
 def get_current_user_from_token():

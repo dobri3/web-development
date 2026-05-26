@@ -2,14 +2,16 @@ import os
 from datetime import datetime, timezone
 import logging
 from flask_migrate import Migrate
+from werkzeug.exceptions import HTTPException
 from .integrations import check_movie_exists
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, g
+from flask import Flask, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
 from .validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
 from .auth import jwt_required
 from .permissions import roles_required
+from .responses import success_response, error_response
 
 load_dotenv()
 logging.basicConfig(
@@ -75,10 +77,17 @@ def create_app() -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error: HTTPException):
+        return error_response(
+            error.name.upper().replace(" ", "_"),
+            error.description,
+            error.code or 500,
+        )
 
     @app.route("/health", methods=["GET"])
     def health_check():
-        return jsonify({"status": "ok"}), 200
+        return success_response({"status": "ok"}, 200)
 
     @app.route("/ugc/", methods=["POST"])
     @jwt_required
@@ -86,21 +95,23 @@ def create_app() -> Flask:
         data = request.get_json(silent=True)
         validated_data, error = validate_ugc_payload(data)
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         exists, django_available = check_movie_exists(validated_data["movie_id"])
 
         if not django_available:
-            return jsonify({
-                "error": "DJANGO_SERVICE_UNAVAILABLE",
-                "detail": "Cannot verify movie existence. Try again later.",
-            }), 503
+            return error_response(
+                "DJANGO_SERVICE_UNAVAILABLE",
+                "Cannot verify movie existence. Try again later.",
+                503,
+            )
 
         if not exists:
-            return jsonify({
-                "error": "MOVIE_NOT_FOUND",
-                "detail": f"Movie with id {validated_data['movie_id']} not found"
-            }), 404
+            return error_response(
+                "MOVIE_NOT_FOUND",
+                f"Movie with id {validated_data['movie_id']} not found",
+                404,
+            )
 
         ugc = UGC(
             type=validated_data["type"],
@@ -112,20 +123,20 @@ def create_app() -> Flask:
         )
         db.session.add(ugc)
         db.session.commit()
-        return jsonify({"data": ugc.to_dict()}), 201
+        return success_response(ugc.to_dict(), 201)
 
     @app.route("/ugc/", methods=["GET"])
     def list_active_ugc():
         movie_id, error = validate_movie_id_query(request.args.get("movie_id"))
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         ugc_items = (
             UGC.query.filter_by(movie_id=movie_id, status="active")
             .order_by(UGC.created_at.desc())
             .all()
         )
-        return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
+        return success_response([ugc.to_dict() for ugc in ugc_items], 200)
 
     @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
     @jwt_required
@@ -133,42 +144,45 @@ def create_app() -> Flask:
     def update_ugc_status(ugc_id):
         ugc = db.session.get(UGC, ugc_id)
         if ugc is None:
-            return jsonify({"error": "NOT_FOUND", "detail": f"UGC with id {ugc_id} not found"}), 404
+            return error_response(
+                "UGC_NOT_FOUND",
+                f"UGC with id {ugc_id} not found",
+                404,
+            )
 
         data = request.get_json(silent=True)
         status, error = validate_status_payload(data)
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         ugc.status = status
         db.session.commit()
-        return jsonify({"data": ugc.to_dict()}), 200
-
+        return success_response(ugc.to_dict(), 200)
     @app.route("/ugc/<int:ugc_id>/hide", methods=["PATCH"])
     @jwt_required
     def hide_own_ugc(ugc_id):
         ugc = db.session.get(UGC, ugc_id)
 
         if ugc is None:
-            return jsonify({
-                "error": "UGC_NOT_FOUND",
-                "detail": "UGC item not found",
-            }), 404
+            return error_response(
+                "UGC_NOT_FOUND",
+                "UGC item not found",
+                404,
+            )
 
         current_user_id = g.current_user["id"]
 
         if ugc.user_id != current_user_id:
-            return jsonify({
-                "error": "FORBIDDEN",
-                "detail": "You can hide only your own UGC",
-            }), 403
+            return error_response(
+                "FORBIDDEN",
+                "You can hide only your own UGC",
+                403,
+            )
 
         ugc.status = "hidden"
         db.session.commit()
 
-        return jsonify({
-            "data": ugc.to_dict()
-        })
+        return success_response(ugc.to_dict(), 200)
 
     return app
 

@@ -46,6 +46,29 @@ def auth_headers(user_id=1, email="user@example.com", role="user"):
         "Authorization": f"Bearer {token}",
     }
 
+def assert_error_response(response, expected_code, expected_status_code):
+    body = response.get_json()
+
+    assert response.status_code == expected_status_code
+    assert body["success"] is False
+    assert body["error"]["code"] == expected_code
+    assert body["error"]["status_code"] == expected_status_code
+    assert "detail" in body["error"]
+    return body["error"]
+
+def test_health_returns_unified_success_response(client):
+    response = client.get("/health")
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert body["data"] == {"status": "ok"}
+
+
+def test_unknown_route_returns_unified_error_response(client):
+    response = client.get("/unknown-route")
+
+    assert_error_response(response, "NOT_FOUND", 404)
 
 def test_create_review_success(client, monkeypatch):
     monkeypatch.setattr(
@@ -65,6 +88,7 @@ def test_create_review_success(client, monkeypatch):
     )
 
     assert response.status_code == 201
+    assert response.get_json()["success"] is True
 
     data = response.get_json()["data"]
     assert data["type"] == "review"
@@ -86,8 +110,7 @@ def test_create_ugc_requires_auth(client):
         },
     )
 
-    assert response.status_code == 401
-    assert response.get_json()["error"] == "AUTHENTICATION_FAILED"
+    assert_error_response(response, "AUTHENTICATION_FAILED", 401)
 
 
 def test_create_ugc_returns_404_when_movie_not_found(client, monkeypatch):
@@ -107,8 +130,7 @@ def test_create_ugc_returns_404_when_movie_not_found(client, monkeypatch):
         headers=auth_headers(user_id=1),
     )
 
-    assert response.status_code == 404
-    assert response.get_json()["error"] == "MOVIE_NOT_FOUND"
+    assert_error_response(response, "MOVIE_NOT_FOUND", 404)
 
 
 def test_create_ugc_returns_503_when_django_unavailable(client, monkeypatch):
@@ -128,8 +150,7 @@ def test_create_ugc_returns_503_when_django_unavailable(client, monkeypatch):
         headers=auth_headers(user_id=1),
     )
 
-    assert response.status_code == 503
-    assert response.get_json()["error"] == "DJANGO_SERVICE_UNAVAILABLE"
+    assert_error_response(response, "DJANGO_SERVICE_UNAVAILABLE", 503)
 
 
 def test_comment_must_not_contain_rating(client, monkeypatch):
@@ -149,8 +170,7 @@ def test_comment_must_not_contain_rating(client, monkeypatch):
         headers=auth_headers(user_id=1),
     )
 
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "VALIDATION_ERROR"
+    assert_error_response(response, "VALIDATION_ERROR", 400)
 
 
 def test_rating_must_not_contain_text(client, monkeypatch):
@@ -170,8 +190,7 @@ def test_rating_must_not_contain_text(client, monkeypatch):
         headers=auth_headers(user_id=1),
     )
 
-    assert response.status_code == 400
-    assert response.get_json()["error"] == "VALIDATION_ERROR"
+    assert_error_response(response, "VALIDATION_ERROR", 400)
 
 
 def test_list_active_ugc_returns_only_active_items(client, app):
@@ -200,6 +219,7 @@ def test_list_active_ugc_returns_only_active_items(client, app):
     response = client.get("/ugc/?movie_id=1")
 
     assert response.status_code == 200
+    assert response.get_json()["success"] is True
 
     data = response.get_json()["data"]
     assert len(data) == 1
@@ -228,6 +248,7 @@ def test_moderator_can_update_ugc_status(client, app):
     )
 
     assert response.status_code == 200
+    assert response.get_json()["success"] is True
 
     data = response.get_json()["data"]
     assert data["status"] == "active"
@@ -253,8 +274,7 @@ def test_regular_user_cannot_update_ugc_status(client, app):
         headers=auth_headers(user_id=1, role="user"),
     )
 
-    assert response.status_code == 403
-    assert response.get_json()["error"] == "FORBIDDEN"
+    assert_error_response(response, "FORBIDDEN", 403)
 
 
 def test_user_can_hide_own_ugc(client, app):
@@ -277,6 +297,7 @@ def test_user_can_hide_own_ugc(client, app):
     )
 
     assert response.status_code == 200
+    assert response.get_json()["success"] is True
 
     data = response.get_json()["data"]
     assert data["status"] == "hidden"
@@ -301,5 +322,4 @@ def test_user_cannot_hide_other_users_ugc(client, app):
         headers=auth_headers(user_id=1, role="user"),
     )
 
-    assert response.status_code == 403
-    assert response.get_json()["error"] == "FORBIDDEN"
+    assert_error_response(response, "FORBIDDEN", 403)
