@@ -1,10 +1,9 @@
 from rest_framework.routers import DefaultRouter
-from rest_framework.urls import urlpatterns
-
-from .views import MovieViewSet, WatchlistViewSet
+from .views import MovieViewSet, WatchlistViewSet, SubscriptionViewSet
 
 router = DefaultRouter()
 router.register(r'movies', MovieViewSet, basename='movie')
 router.register(r'watchlist', WatchlistViewSet, basename='watchlist')
+router.register(r"subscription", SubscriptionViewSet, basename="subscription")
 
 urlpatterns = router.urls
