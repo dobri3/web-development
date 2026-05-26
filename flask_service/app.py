@@ -8,7 +8,13 @@ from dotenv import load_dotenv
 from flask import Flask, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
-from .validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from .validation import (
+    validate_ugc_payload,
+    validate_movie_id_query,
+    validate_status_payload,
+    validate_optional_positive_int_query,
+    validate_optional_status_query,
+)
 from .auth import jwt_required
 from .permissions import roles_required
 from .responses import success_response, error_response
@@ -137,6 +143,48 @@ def create_app() -> Flask:
             .all()
         )
         return success_response([ugc.to_dict() for ugc in ugc_items], 200)
+
+    @app.route("/ugc/moderation/", methods=["GET"])
+    @jwt_required
+    @roles_required("admin", "moderator")
+    def list_ugc_for_moderation():
+        movie_id, error = validate_optional_positive_int_query(
+            request.args.get("movie_id"),
+            "movie_id",
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        user_id, error = validate_optional_positive_int_query(
+            request.args.get("user_id"),
+            "user_id",
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        status, error = validate_optional_status_query(
+            request.args.get("status")
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        query = UGC.query
+
+        if movie_id is not None:
+            query = query.filter_by(movie_id=movie_id)
+
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+
+        if status is not None:
+            query = query.filter_by(status=status)
+
+        ugc_items = query.order_by(UGC.created_at.desc()).all()
+
+        return success_response(
+            [ugc.to_dict() for ugc in ugc_items],
+            200,
+        )
 
     @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
     @jwt_required

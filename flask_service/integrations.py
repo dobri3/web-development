@@ -8,7 +8,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 def check_movie_exists(movie_id: int) -> tuple[bool, bool]:
-    django_url = os.getenv("DJANGO_SERVICE_URL", "http://127.0.0.1:8000")
+    django_url = os.getenv("DJANGO_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
     logger.debug("checking movie %s at %s", movie_id, django_url)
     try:
         response = httpx.get(
@@ -31,7 +31,6 @@ def check_movie_exists(movie_id: int) -> tuple[bool, bool]:
         return False, False
 
     except httpx.RequestError as e:
-        print(f"DEBUG: request error = {e}")
         logger.warning(f"Django недоступен, пропускаем проверку фильма: {e}")
         return False, False
 

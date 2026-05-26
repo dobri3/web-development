@@ -99,3 +99,29 @@ def validate_status_payload(data):
         return None, validation_error("status must be one of: active, hidden, pending")
 
     return status, None
+
+def validate_optional_positive_int_query(raw_value: str | None, field_name: str):
+    if raw_value is None:
+        return None, None
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, validation_error(f"{field_name} must be a number")
+
+    if value <= 0:
+        return None, validation_error(f"{field_name} must be a positive number")
+
+    return value, None
+
+
+def validate_optional_status_query(raw_status: str | None):
+    if raw_status is None:
+        return None, None
+
+    if raw_status not in ALLOWED_STATUSES:
+        return None, validation_error(
+            "status must be one of: active, hidden, pending"
+        )
+
+    return raw_status, None
