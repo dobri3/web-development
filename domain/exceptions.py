@@ -5,6 +5,11 @@ class DomainError(Exception):
     """Базовое доменное исключение"""
     status_code = 400
     error_code = "DOMAIN_ERROR"
+    def __init__(self, detail):
+
+        self.detail = detail
+
+        super().__init__(detail)
 
 
 class MovieNotFound(DomainError):
