@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, status
-from schemas import RegisterRequest, LoginRequest, TokenResponse
+from schemas import RegisterRequest, LoginRequest
 from auth import hash_password, verify_password, create_access_token, create_refresh_token
 from database import fake_users_db
+from schemas import RefreshRequest
+from jose import jwt, JWTError
+from config import SECRET_KEY, ALGORITHM
 import logging
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -17,27 +20,91 @@ async def register(data: RegisterRequest):
         )
 
     fake_users_db[data.email] = {
+        "id": len(fake_users_db) + 1,
         "email": data.email,
-        "hashed_password": hash_password(data.password)
+        "hashed_password": hash_password(data.password),
+        "role": "user"
     }
 
     logger.info(f"Новый пользователь зарегистрирован: {data.email}")
-    return {"message": "Регистрация успешна"}
+    
+    return {
+        "success": True,
+        "data": {
+            "message": "Регистрация успешна"
+        }
+    }
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 async def login(data: LoginRequest):
     user = fake_users_db.get(data.email)
 
     if not user or not verify_password(data.password, user["hashed_password"]):
-        logger.warning(f"Неудачная попытка входа: {data.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный email или пароль"
         )
 
-    logger.info(f"Пользователь вошёл: {data.email}")
-    return TokenResponse(
-        access_token=create_access_token(data.email),
-        refresh_token=create_refresh_token(data.email)
+    access_token = create_access_token(
+        data.email,
+        user_id=user["id"],
+        role=user.get("role", "user")
     )
+
+    refresh_token = create_refresh_token(data.email)
+
+    return {
+        "success": True,
+        "data": {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+    }
+
+
+@router.post("/refresh")
+async def refresh_token(data: RefreshRequest):
+    try:
+        payload = jwt.decode(
+            data.refresh_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        email = payload.get("sub")
+        token_type = payload.get("type")
+
+        if email is None or token_type != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Невалидный refresh token"
+            )
+
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Невалидный refresh token"
+        )
+
+    user = fake_users_db.get(email)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Пользователь не найден"
+        )
+
+    return {
+        "success": True,
+        "data": {
+            "access_token": create_access_token(
+                email,
+                user_id=user["id"],
+                role=user.get("role", "user")
+            ),
+            "refresh_token": data.refresh_token,
+            "token_type": "bearer"
+        }
+    }
