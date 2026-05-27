@@ -19,10 +19,17 @@ class MovieSerializer(serializers.ModelSerializer):
         fields = ['id', 'title', 'description', 'release_year', 'genres']
 
 
-# сериализатор для проверки query_params
 class MovieFilterSerializer(serializers.Serializer):
-    genre = serializers.CharField(required=False)
-    release_year = serializers.IntegerField(required=False)
+    '''сериализатор для проверки query_params'''
+    genre = serializers.CharField(
+        required=False,
+        allow_blank=False,
+        max_length=100,
+    )
+    release_year = serializers.IntegerField(
+        required=False,
+        min_value=1895,
+    )
 
 class WatchlistSerializer(serializers.ModelSerializer):
     movie = serializers.PrimaryKeyRelatedField(queryset=Movie.objects.all()) # Будет показывать ID, а не весь класс
