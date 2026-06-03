@@ -88,3 +88,33 @@ class GenreNotFoundError(DomainError):
             super().__init__(f"Genre '{genre_name}' not found")
         else:
             super().__init__("Genre not found")
+
+
+class SubscriptionNotFound(DomainError):
+    """Подписка не найдена"""
+    status_code = 404
+    error_code = "SUBSCRIPTION_NOT_FOUND"
+
+    def __init__(self, username: str):
+        self.username = username
+        super().__init__(f"Subscription for user {username} not found")
+
+
+class ActiveSubscriptionNotFound(DomainError):
+    """Активная подписка не найдена"""
+    status_code = 404
+    error_code = "ACTIVE_SUBSCRIPTION_NOT_FOUND"
+
+    def __init__(self, username: str):
+        self.username = username
+        super().__init__(f"Active subscription for user {username} not found")
+
+
+class SubscriptionAlreadyInactive(DomainError):
+    """Подписка уже неактивна"""
+    status_code = 400
+    error_code = "SUBSCRIPTION_ALREADY_INACTIVE"
+
+    def __init__(self, username: str):
+        self.username = username
+        super().__init__(f"Subscription for user {username} is already inactive")

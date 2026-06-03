@@ -1,35 +1,47 @@
-from rest_framework import mixins, viewsets, permissions, filters, status
+from rest_framework import mixins, viewsets, permissions, filters, status, generics
 from rest_framework.response import Response
+
+from rest_framework.decorators import action
 
 from domain.models import Movie, Watchlist
 from services.watchlist_service import add_to_watchlist, remove_from_watchlist
-from .serializers import MovieSerializer, WatchlistSerializer
+from .serializers import (
+    MovieSerializer,
+    MovieFilterSerializer,
+    WatchlistSerializer, 
+    SubscriptionSerializer,
+)
+from services.movie_service import get_movie, get_movies
 
+from services.subscription_service import (
+    create_or_extend_subscription,
+    cancel_subscription,
+    get_user_active_subscription,
+    get_user_subscription,
+)
 
 class MovieViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Movie.objects.all().order_by("id")
     serializer_class = MovieSerializer
     permission_classes = [permissions.AllowAny]
 
+    # Настройка query_params: ?search= и ?ordering=
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["title", "description", "genres__name"]
     ordering_fields = ["title", "release_year"]
     ordering = ["title"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        serializer = MovieFilterSerializer(data=self.request.query_params)
+        serializer.is_valid(raise_exception=True)
 
-        genre = self.request.query_params.get("genre")
-        release_year = self.request.query_params.get("release_year")
+        return get_movies(serializer.validated_data)
 
-        if genre:
-            queryset = queryset.filter(genres__name__icontains=genre)
+    def retrieve(self, request, *args, **kwargs):
+        movie = get_movie(kwargs["pk"])
 
-        if release_year:
-            queryset = queryset.filter(release_year=release_year)
-
-        return queryset.distinct()
-
+        serializer = self.get_serializer(movie)
+        return Response(serializer.data)
 
 class WatchlistViewSet(
     mixins.ListModelMixin,
@@ -40,6 +52,9 @@ class WatchlistViewSet(
     serializer_class = WatchlistSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    # queryset состоит из всех объектов watchlist, которыми
+    # обладает автор запроса в порядке, начиная с 
+    # недавно добавленных фильмов
     def get_queryset(self):
         return (
             Watchlist.objects
@@ -71,3 +86,34 @@ class WatchlistViewSet(
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+class SubscriptionViewSet(viewsets.GenericViewSet):
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        subscription = get_user_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)
+
+    def create(self, request, *args, **kwargs):
+        subscription = create_or_extend_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def active(self, request, *args, **kwargs):
+        subscription = get_user_active_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["post"])
+    def cancel(self, request, *args, **kwargs):
+        subscription = cancel_subscription(request.user)
+
+        serializer = self.get_serializer(subscription)
+        return Response(serializer.data)

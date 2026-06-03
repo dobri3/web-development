@@ -12,7 +12,6 @@ class Movie(models.Model):
 class Subscription(models.Model):
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE)
     expires_at = models.DateTimeField()
-    is_active = models.BooleanField(default=True)
 
 class Watchlist(models.Model):
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE)
