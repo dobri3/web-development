@@ -1,753 +1,89 @@
 # Cinema Project
 
-Проект делится на три части:
+Учебный backend-проект для кинотеатра. Проект состоит из нескольких сервисов и показывает работу с Django REST Framework, сервисным слоем, Flask и FastAPI.
 
-1. **Django + DRF** — основной сервис каталога фильмов и watchlist.
-2. **FastAPI** — отдельный микросервис авторизации, JWT и уведомлений по watchlist.
-3. **Flask** — отдельный микросервис UGC: отзывы, комментарии, рейтинги и модерация статусов.
-
----
-
-## 1. Общая архитектура
+## Состав проекта
 
 ```text
 web-development/
-├── cinema_project/          # настройки и URL-конфигурация Django-проекта
+├── cinema_project/          # настройки Django-проекта
 ├── api/                     # DRF serializers, viewsets, urls, обработчик ошибок
-├── domain/                  # доменные модели и доменные исключения
-├── movies/                  # Django app для регистрации моделей в админке
-├── services/                # бизнес-логика Django, вынесенная из viewset
-├── fastapi_service/         # отдельный FastAPI-сервис: auth, JWT, watchlist notify
-├── flask_service/           # отдельный Flask-сервис: UGC и модерация
-├── manage.py                # запуск Django-команд
-├── db.sqlite3               # локальная SQLite-база Django
-└── requirements.txt         # зависимости основного Django-проекта
+├── domain/                  # доменные модели и исключения
+├── movies/                  # Django app для регистрации моделей в admin
+├── services/                # бизнес-логика Django-приложения
+├── flask_service/           # UGC-сервис на Flask
+├── fastapi_service/         # FastAPI-сервис авторизации и async-сценариев
+├── manage.py                # Django CLI
+├── requirements.txt         # зависимости основного проекта и тестов
+└── .env.example             # пример переменных окружения
 ```
 
----
+Основные части:
 
-## 2. Django-сервис
+- **Django + DRF** — каталог фильмов, жанры, подписки и watchlist.
+- **Service layer** — бизнес-логика вынесена из HTTP-слоя в `services/`.
+- **Flask** — отдельный UGC-сервис для отзывов, комментариев, рейтингов и модерации.
+- **FastAPI** — отдельный сервис с JWT-авторизацией, async endpoint-ами и background task.
 
-Django хранит каталог фильмов, жанры, подписки и watchlist пользователей.
+## Переменные окружения
 
-### 2.1. Основные модули Django
-
-#### `cinema_project/settings.py`
-
-Настройки Django в котором:
-
-- стандартные Django-приложения;
-- `movies`;
-- `api`;
-- `domain`;
-- `rest_framework`;
-- `django_filters`.
-
-Также здесь настроены:
-
-- загрузка переменных окружения через `python-dotenv`;
-- база данных через `dj_database_url`;
-- пагинация DRF;
-- кастомный обработчик ошибок `api.exception_handler.custom_exception_handler`.
-
-#### `cinema_project/urls.py`
-
-Главная URL-конфигурация Django:
-
-```python
-urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('api.urls')),
-]
-```
-
-Все DRF-эндпоинты доступны с префиксом `/api/`.
-
-#### `domain/models.py`
-
-Содержит доменные модели:
-
-| Модель | Назначение |
-|---|---|
-| `Genre` | Жанр фильма. Поля: `name`. |
-| `Movie` | Фильм. Поля: `title`, `description`, `release_year`, связь many-to-many с `Genre`. |
-| `Subscription` | Подписка пользователя. Связана с `auth.User`, содержит `expires_at` и `is_active`. |
-| `Watchlist` | Фильм в списке просмотра пользователя. Связан с `auth.User` и `Movie`. |
-
-Для `Watchlist` задано ограничение уникальности:
-
-```python
-unique_together = ('user', 'movie')
-```
-
-Один и тот же пользователь не может добавить один и тот же фильм в watchlist дважды.
-
-#### `domain/exceptions.py`
-
-Здесь описаны доменные исключения. Все они наследуются от `DomainError` и содержат:
-
-- `status_code` — HTTP-статус;
-- `error_code` — машинно-читаемый код ошибки;
-- текстовое описание ошибки.
-
-Примеры:
-
-| Исключение | HTTP-статус | Код ошибки | Когда возникает |
-|---|---:|---|---|
-| `MovieNotFound` | 404 | `MOVIE_NOT_FOUND` | Фильм не найден. |
-| `AlreadyInWatchlist` | 409 | `ALREADY_IN_WATCHLIST` | Фильм уже есть в watchlist пользователя. |
-| `WatchlistItemNotFound` | 404 | `WATCHLIST_ITEM_NOT_FOUND` | Запись watchlist не найдена при удалении. |
-| `WatchlistLimitExceededError` | 400 | `WATCHLIST_LIMIT_EXCEEDED` | Превышен лимит фильмов в watchlist. |
-| `UserNotAuthorized` | 401 | `USER_NOT_AUTHORIZED` | Пользователь не авторизован. |
-| `PermissionDenied` | 403 | `PERMISSION_DENIED` | Нет прав доступа. |
-| `GenreNotFoundError` | 404 | `GENRE_NOT_FOUND` | Жанр не найден. |
-
-#### `api/exception_handler.py`
-
-Кастомный обработчик ошибок DRF. Если выброшено доменное исключение `DomainError`, ответ приводится к единому формату:
-
-```json
-{
-  "error": "MOVIE_NOT_FOUND",
-  "detail": "Movie with id 10 not found"
-}
-```
-
-#### `api/serializers.py`
-
-Содержит DRF-сериализаторы:
-
-| Сериализатор | Назначение |
-|---|---|
-| `GenreSerializer` | Возвращает название жанра. |
-| `MovieSerializer` | Возвращает данные фильма: `id`, `title`, `description`, `release_year`, `genres`. |
-| `WatchlistSerializer` | Принимает `movie` как id фильма, а `user` и `added_at` отдаёт только для чтения. |
-
-#### `api/views.py`
-
-Содержит два viewset-класса.
-
-##### `MovieViewSet`
-
-Наследуется от `ReadOnlyModelViewSet`, поэтому поддерживает только чтение:
-
-- список фильмов;
-- получение одного фильма по id.
-
-Доступ открыт всем пользователям:
-
-```python
-permission_classes = [permissions.AllowAny]
-```
-
-Поддерживаются:
-
-- поиск по `title`, `description`, `genres__name`;
-- сортировка по `title`, `release_year`;
-- фильтрация по query-параметрам `genre` и `release_year`.
-
-##### `WatchlistViewSet`
-
-Поддерживает:
-
-- получение watchlist текущего пользователя;
-- добавление фильма;
-- удаление фильма.
-
-Доступ только для авторизованных пользователей:
-
-```python
-permission_classes = [permissions.IsAuthenticated]
-```
-
-Viewset не содержит бизнес-логику напрямую. Он вызывает функции из `services/watchlist_service.py`.
-
-#### `services/watchlist_service.py`
-
-Сервисный слой для операций с watchlist.
-
-Функция `add_to_watchlist(user, movie_id)`:
-
-1. Ищет фильм в базе Django.
-2. Если фильма нет — выбрасывает `MovieNotFound`.
-3. Проверяет, что фильм ещё не добавлен пользователем.
-4. Если фильм уже есть — выбрасывает `AlreadyInWatchlist`.
-5. Создаёт запись `Watchlist` в транзакции.
-6. Отправляет HTTP-запрос в FastAPI на `/watchlist/notify`.
-7. Если FastAPI недоступен, Django не падает, а пишет предупреждение в лог.
-
-Функция `remove_from_watchlist(user, movie_id)`:
-
-1. Удаляет запись watchlist пользователя.
-2. Если такой записи не было — выбрасывает `WatchlistItemNotFound`.
-
-Таким образом, viewset занимается HTTP-слоем, а `watchlist_service.py` — бизнес-правилами.
-
----
-
-## 3. Django API endpoints
-
-Все Django-эндпоинты находятся под префиксом `/api/`.
-
-### 3.1. Фильмы
-
-#### `GET /api/movies/`
-
-Возвращает список фильмов.
-
-Пример ответа:
-
-```json
-{
-  "count": 1,
-  "next": null,
-  "previous": null,
-  "results": [
-    {
-      "id": 1,
-      "title": "The Matrix",
-      "description": "A computer hacker learns about the true nature of reality.",
-      "release_year": 1999,
-      "genres": ["Action", "Sci-Fi"]
-    }
-  ]
-}
-```
-
-Поддерживаемые query-параметры:
-
-| Параметр | Пример | Назначение |
-|---|---|---|
-| `search` | `/api/movies/?search=matrix` | Поиск по названию, описанию и жанрам. |
-| `genre` | `/api/movies/?genre=action` | Фильтр по названию жанра. |
-| `release_year` | `/api/movies/?release_year=1999` | Фильтр по году выпуска. |
-| `ordering` | `/api/movies/?ordering=title` | Сортировка по названию. |
-| `ordering` | `/api/movies/?ordering=-release_year` | Сортировка по году выпуска по убыванию. |
-
-#### `GET /api/movies/{id}/`
-
-Возвращает один фильм по id.
-
-Пример:
-
-```http
-GET /api/movies/1/
-```
-
-Если фильм не найден, DRF вернёт 404.
-
-### 3.2. Watchlist
-
-Эндпоинты watchlist требуют авторизации Django/DRF.
-
-В проекте не задан кастомный `DEFAULT_AUTHENTICATION_CLASSES`, используются стандартные механизмы DRF: session authentication и basic authentication.
-
-#### `GET /api/watchlist/`
-
-Возвращает watchlist текущего авторизованного пользователя.
-
-Пример ответа:
-
-```json
-{
-  "count": 1,
-  "next": null,
-  "previous": null,
-  "results": [
-    {
-      "user": "testuser",
-      "movie": 1,
-      "added_at": "2026-04-24T06:59:00Z"
-    }
-  ]
-}
-```
-
-#### `POST /api/watchlist/`
-
-Добавляет фильм в watchlist текущего пользователя.
-
-Тело запроса:
-
-```json
-{
-  "movie": 1
-}
-```
-
-Успешный ответ:
-
-```json
-{
-  "user": "testuser",
-  "movie": 1,
-  "added_at": "2026-04-24T06:59:00Z"
-}
-```
-
-Возможные ошибки:
-
-| Ситуация | HTTP-статус | Формат ошибки |
-|---|---:|---|
-| Пользователь не авторизован | 403 или 401 | стандартный ответ DRF |
-| Фильм уже есть в watchlist | 409 | `ALREADY_IN_WATCHLIST` |
-| Фильм не найден | 404 | ошибка валидации serializer или `MOVIE_NOT_FOUND` |
-
-После успешного добавления Django пытается уведомить FastAPI-сервис через `POST /watchlist/notify`.
-
-#### `DELETE /api/watchlist/{id}/`
-
-Удаляет запись watchlist по id записи watchlist, а не по id фильма.
-
-Пример:
-
-```http
-DELETE /api/watchlist/5/
-```
-
-Успешный ответ — пустой ответ со статусом `204 No Content`.
-
----
-
-## 4. FastAPI-сервис
-
-FastAPI-сервис расположен в папке `fastapi_service/` и запускается отдельно от Django. Он показывает работу:
-
-- async-эндпоинтов;
-- Pydantic-схем;
-- JWT-авторизации;
-- фоновых задач;
-- интеграции с Django через notify-эндпоинт.
-
-### 4.1. Основные файлы FastAPI
-
-| Файл | Назначение |
-|---|---|
-| `fastapi_service/main.py` | Создаёт объект `FastAPI`, подключает роутеры, настраивает logging. |
-| `fastapi_service/config.py` | Читает настройки JWT из переменных окружения. |
-| `fastapi_service/database.py` | Содержит in-memory словарь `fake_users_db`. Данные не сохраняются после перезапуска. |
-| `fastapi_service/auth.py` | Хэширование паролей, создание JWT, проверка Bearer token. |
-| `fastapi_service/schemas.py` | Pydantic-модели запросов и ответов. |
-| `fastapi_service/tasks.py` | Фоновая задача `notify_user`. |
-| `fastapi_service/routers/auth_router.py` | Роуты регистрации и входа. |
-| `fastapi_service/routers/watchlist_router.py` | Роуты watchlist и notify. |
-
-### 4.2. JWT-логика
-
-В `auth.py` реализованы функции:
-
-| Функция | Что делает |
-|---|---|
-| `hash_password` | Хэширует пароль через bcrypt. |
-| `verify_password` | Проверяет пароль относительно хэша. |
-| `create_access_token` | Создаёт access token с типом `access`. |
-| `create_refresh_token` | Создаёт refresh token с типом `refresh`. |
-| `get_current_user` | Проверяет Bearer token и возвращает текущего пользователя. |
-
-Access token используется для защищённых запросов. Refresh token генерируется при логине.
-
-### 4.3. FastAPI endpoints
-
-#### `GET /health`
-
-Проверка, что FastAPI-сервис запущен.
-
-Ответ:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-#### `POST /auth/register`
-
-Регистрирует пользователя во временном in-memory хранилище.
-
-Тело запроса:
-
-```json
-{
-  "email": "student@example.com",
-  "password": "qwerty123"
-}
-```
-
-Успешный ответ:
-
-```json
-{
-  "message": "Регистрация успешна"
-}
-```
-
-Особенности:
-
-- email валидируется через `EmailStr`;
-- пароль сохраняется не в открытом виде, а как bcrypt-хэш;
-- данные лежат в `fake_users_db`, поэтому после перезапуска сервиса пользователь исчезает.
-
-#### `POST /auth/login`
-
-Проверяет email и пароль, возвращает пару токенов.
-
-Тело запроса:
-
-```json
-{
-  "email": "student@example.com",
-  "password": "qwerty123"
-}
-```
-
-Ответ:
-
-```json
-{
-  "access_token": "jwt-access-token",
-  "refresh_token": "jwt-refresh-token"
-}
-```
-
-#### `POST /watchlist/`
-
-Защищённый endpoint. Требует заголовок:
-
-```http
-Authorization: Bearer <access_token>
-```
-
-Тело запроса:
-
-```json
-{
-  "movie_id": 1
-}
-```
-
-Что происходит внутри:
-
-1. FastAPI проверяет access token через `Depends(get_current_user)`.
-2. Pydantic валидирует тело запроса.
-3. Добавляется фоновая задача `notify_user`.
-4. Endpoint сразу возвращает ответ клиенту.
-5. Фоновая задача пишет в лог имитацию отправки уведомления.
-
-Успешный ответ:
-
-```json
-{
-  "status": "added",
-  "movie_id": 1
-}
-```
-
-Важно: этот endpoint не записывает данные в Django-базу. Он демонстрирует защищённый async endpoint и background task.
-
-#### `POST /watchlist/notify`
-
-Endpoint для интеграции с Django. Его вызывает `services/watchlist_service.py` после успешного добавления фильма в Django watchlist.
-
-Тело запроса:
-
-```json
-{
-  "user_id": 1,
-  "movie_id": 10
-}
-```
-
-Ответ:
-
-```json
-{
-  "status": "received"
-}
-```
-
-Этот endpoint не требует JWT. Он принимает внутреннее уведомление от Django и пишет событие в лог.
-
----
-
-## 5. Flask UGC service
-
-Flask-сервис расположен в папке `flask_service/`. Он отвечает за пользовательский контент:
-
-- отзывы;
-- комментарии;
-- рейтинги;
-- статусы модерации.
-
-Сервис использует SQLAlchemy и локальную SQLite-базу. По умолчанию база создаётся автоматически при запуске приложения.
-
-### 5.1. Основные файлы Flask
-
-| Файл | Назначение |
-|---|---|
-| `flask_service/app.py` | Создаёт Flask-приложение, модель `UGC`, endpoints. |
-| `flask_service/validation.py` | Ручная валидация входных данных. |
-| `flask_service/integrations.py` | HTTP-проверка существования фильма в Django. |
-| `flask_service/requirements.txt` | Зависимости Flask-сервиса. |
-
-### 5.2. Модель UGC
-
-Модель `UGC` содержит поля:
-
-| Поле | Тип | Описание |
-|---|---|---|
-| `id` | integer | Первичный ключ. |
-| `type` | string | Тип контента: `review`, `comment`, `rating`. |
-| `text` | text | Текст пользовательского контента. |
-| `rating` | float | Оценка от 1 до 10. |
-| `status` | string | Статус: `pending`, `active`, `hidden`. |
-| `movie_id` | integer | id фильма из Django-сервиса. |
-| `created_at` | datetime | Время создания. |
-
-В базе также заданы `CheckConstraint`, которые дополнительно защищают данные на уровне БД:
-
-- `type IN ('review', 'comment', 'rating')`;
-- `status IN ('active', 'hidden', 'pending')`;
-- `rating >= 1 AND rating <= 10`.
-
-### 5.3. Flask endpoints
-
-#### `GET /health`
-
-Проверка, что Flask-сервис запущен.
-
-Ответ:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-#### `POST /ugc/`
-
-Создаёт новый UGC-объект.
-
-Тело запроса:
-
-```json
-{
-  "type": "review",
-  "text": "Хороший фильм",
-  "rating": 8,
-  "movie_id": 1
-}
-```
-
-Валидация:
-
-| Поле | Правило |
-|---|---|
-| `type` | Только `review`, `comment`, `rating`. |
-| `text` | Непустая строка, максимум 1000 символов. |
-| `rating` | Число от 1 до 10, `bool` не допускается. |
-| `movie_id` | Положительное целое число. |
-
-Перед сохранением Flask пытается проверить, существует ли фильм в Django:
-
-```text
-Flask -> GET http://127.0.0.1:8000/api/movies/{movie_id}/
-```
-
-Если Django доступен и фильм не найден, Flask вернёт 404. Если Django недоступен, Flask пишет предупреждение в лог и продолжает создание UGC.
-
-Новый UGC создаётся со статусом `pending`.
-
-Успешный ответ:
-
-```json
-{
-  "data": {
-    "id": 1,
-    "type": "review",
-    "text": "Хороший фильм",
-    "rating": 8,
-    "status": "pending",
-    "movie_id": 1,
-    "created_at": "2026-04-24T06:59:00Z"
-  }
-}
-```
-
-#### `GET /ugc/?movie_id={id}`
-
-Возвращает только активный UGC по конкретному фильму.
-
-Пример:
-
-```http
-GET /ugc/?movie_id=1
-```
-
-Сервис отдаёт только записи со статусом `active`. Записи `pending` и `hidden` в публичную выдачу не попадают.
-
-#### `PATCH /ugc/{ugc_id}/status`
-
-Обновляет статус UGC-записи.
-
-Тело запроса:
-
-```json
-{
-  "status": "active"
-}
-```
-
-Допустимые статусы:
-
-- `active`;
-- `hidden`;
-- `pending`.
-
-Этот endpoint можно использовать как простую модерацию: сначала отзыв создаётся в `pending`, затем модератор переводит его в `active` или `hidden`.
-
----
-
-## 6. Как сервисы взаимодействуют
-
-### 6.1. Добавление фильма в watchlist через Django
-
-```text
-Клиент
-  |
-  | POST /api/watchlist/
-  v
-Django DRF WatchlistViewSet
-  |
-  | вызывает add_to_watchlist(user, movie_id)
-  v
-services/watchlist_service.py
-  |
-  | создаёт Watchlist в Django DB
-  |
-  | POST /watchlist/notify
-  v
-FastAPI service
-  |
-  | пишет событие в лог
-  v
-Ответ клиенту от Django
-```
-
-Примечание: если FastAPI не запущен, Django всё равно завершит добавление фильма в watchlist. Ошибка интеграции не ломает основной сценарий.
-
-### 6.2. Создание UGC через Flask
-
-```text
-Клиент
-  |
-  | POST /ugc/
-  v
-Flask UGC service
-  |
-  | валидирует тело запроса
-  |
-  | GET /api/movies/{movie_id}/
-  v
-Django movie API
-  |
-  | подтверждает наличие фильма
-  v
-Flask сохраняет UGC в своей БД
-```
-
-Если Django доступен и фильма нет — Flask возвращает 404. Если Django недоступен — Flask разрешает создать UGC, но пишет предупреждение в лог.
-
-### 6.3. FastAPI watchlist endpoint
-
-```text
-Клиент
-  |
-  | POST /auth/register
-  | POST /auth/login
-  v
-FastAPI auth
-  |
-  | возвращает access_token
-  v
-Клиент
-  |
-  | POST /watchlist/ с Bearer token
-  v
-FastAPI watchlist
-  |
-  | запускает background task notify_user
-  v
-Ответ клиенту сразу, уведомление выполняется в фоне
-```
-
-Этот сценарий демонстрирует JWT и background tasks. Он не синхронизирует данные с Django watchlist.
-
----
-
-## 7. Переменные окружения
-
-В корне проекта есть `.env.example`:
+В корне есть пример файла `.env.example`:
 
 ```env
-SECRET_KEY="django-insecure-..."
+SECRET_KEY=django-insecure-dev-key-change-me
 DEBUG=True
 ALLOWED_HOSTS=127.0.0.1,localhost
 DATABASE_URL=sqlite:///db.sqlite3
-```
-
-Для полноценного запуска интеграций также полезно задать:
-
-```env
 FASTAPI_SERVICE_URL=http://127.0.0.1:8001
 DJANGO_SERVICE_URL=http://127.0.0.1:8000
-FLASK_DATABASE_URL=sqlite:///ugc.sqlite3
+ADMIN_EMAILS=admin@example.com
+MODERATOR_EMAILS=moderator@example.com
 ```
 
-Назначение переменных:
+Перед запуском можно создать локальный `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Назначение основных переменных:
 
 | Переменная | Где используется | Назначение |
 |---|---|---|
-| `SECRET_KEY` | Django и FastAPI | Секретный ключ Django/JWT. |
-| `DEBUG` | Django и Flask | Режим отладки. |
+| `SECRET_KEY` | Django, Flask/FastAPI JWT | Секретный ключ приложения. |
+| `DEBUG` | Django, Flask | Режим отладки. |
 | `ALLOWED_HOSTS` | Django | Разрешённые хосты. |
-| `DATABASE_URL` | Django | URL основной базы данных. |
-| `FASTAPI_SERVICE_URL` | Django `watchlist_service.py` | Адрес FastAPI для notify-запросов. |
-| `DJANGO_SERVICE_URL` | Flask `integrations.py` | Адрес Django для проверки фильма. |
-| `FLASK_DATABASE_URL` | Flask | База UGC-сервиса. |
-| `ALGORITHM` | FastAPI | Алгоритм подписи JWT, по умолчанию `HS256`. |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | FastAPI | Время жизни access token, по умолчанию 30 минут. |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | FastAPI | Время жизни refresh token, по умолчанию 7 дней. |
+| `DATABASE_URL` | Django | Подключение к основной БД. |
+| `FASTAPI_SERVICE_URL` | Django service layer | Адрес FastAPI-сервиса для интеграционных вызовов. |
+| `DJANGO_SERVICE_URL` | Flask UGC | Адрес Django API для проверки существования фильма. |
+| `ADMIN_EMAILS` | Flask auth/permissions | Email-адреса пользователей с ролью admin. |
+| `MODERATOR_EMAILS` | Flask auth/permissions | Email-адреса пользователей с ролью moderator. |
 
-Примечание: `services/watchlist_service.py` обращается к `settings.FASTAPI_SERVICE_URL`. Перед проверкой интеграции нужно убедиться, что это значение доступно в Django settings.
+## Установка
 
----
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-## 8. Установка и запуск
+Для Windows активация окружения будет другой:
 
-Ниже приведён вариант запуска в трёх отдельных терминалах.
+```bash
+.venv\Scripts\activate
+```
 
-### 8.1. Подготовка окружения
+## Запуск Django
 
 Из корня проекта:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate      # Linux/macOS
-# .venv\Scripts\activate       # Windows
-```
-
-Создать `.env` на основе `.env.example` и заполнить нужные переменные.
-
-### 8.2. Запуск Django
-
-```bash
-pip install -r requirements.txt
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py runserver 8000
 ```
 
-Django admin:
+Админка:
 
 ```text
 http://127.0.0.1:8000/admin/
@@ -759,17 +95,200 @@ Django API:
 http://127.0.0.1:8000/api/
 ```
 
-### 8.3. Запуск FastAPI
+## Django-модели
 
-В отдельном терминале:
+Основные модели находятся в `domain/models.py`.
+
+| Модель | Назначение |
+|---|---|
+| `Genre` | Жанры фильмов. |
+| `Movie` | Фильмы каталога. |
+| `Subscription` | Подписка пользователя. |
+| `Watchlist` | Список фильмов пользователя. |
+
+Для `Watchlist` используется ограничение уникальности по паре `user + movie`, чтобы один пользователь не мог добавить один и тот же фильм несколько раз.
+
+## Django API
+
+Все endpoint-ы Django доступны с префиксом `/api/`.
+
+### Movies
+
+```http
+GET /api/movies/
+GET /api/movies/{id}/
+```
+
+Список фильмов поддерживает:
+
+| Параметр | Пример | Назначение |
+|---|---|---|
+| `search` | `/api/movies/?search=matrix` | Поиск по названию, описанию и жанрам. |
+| `genre` | `/api/movies/?genre=action` | Фильтрация по жанру. |
+| `release_year` | `/api/movies/?release_year=1999` | Фильтрация по году выпуска. |
+| `ordering` | `/api/movies/?ordering=title` | Сортировка по названию. |
+| `ordering` | `/api/movies/?ordering=-release_year` | Сортировка по году выпуска по убыванию. |
+
+Пример:
 
 ```bash
-cd fastapi_service
-pip install -r requirements.txt
+curl "http://127.0.0.1:8000/api/movies/?search=matrix"
+```
+
+### Watchlist
+
+Endpoint-ы watchlist требуют авторизации Django/DRF.
+
+```http
+GET /api/watchlist/
+POST /api/watchlist/
+DELETE /api/watchlist/{id}/
+```
+
+Добавление фильма:
+
+```bash
+curl -u testuser:password \
+  -X POST http://127.0.0.1:8000/api/watchlist/ \
+  -H "Content-Type: application/json" \
+  -d '{"movie": 1}'
+```
+
+`DELETE /api/watchlist/{id}/` удаляет запись watchlist по id самой записи, а не по id фильма.
+
+### Subscription
+
+Endpoint-ы подписки требуют авторизации.
+
+```http
+GET  /api/subscription/
+POST /api/subscription/
+GET  /api/subscription/active/
+POST /api/subscription/cancel/
+```
+
+Назначение:
+
+| Endpoint | Что делает |
+|---|---|
+| `GET /api/subscription/` | Возвращает подписку текущего пользователя. |
+| `POST /api/subscription/` | Создаёт или продлевает подписку. |
+| `GET /api/subscription/active/` | Проверяет активную подписку. |
+| `POST /api/subscription/cancel/` | Отменяет подписку. |
+
+## Service layer
+
+Бизнес-логика Django вынесена в папку `services/`.
+
+| Файл | Назначение |
+|---|---|
+| `services/movie_service.py` | Получение списка фильмов и одного фильма. |
+| `services/watchlist_service.py` | Добавление и удаление фильмов из watchlist. |
+| `services/subscription_service.py` | Создание, продление, отмена и проверка подписки. |
+| `services/integration_service.py` | Внешние HTTP-вызовы между сервисами. |
+
+HTTP-слой находится в `api/views.py`, а доменные ошибки — в `domain/exceptions.py`. Ошибки приводятся к единому формату через `api/exception_handler.py`.
+
+Пример доменной ошибки:
+
+```json
+{
+  "error": "ALREADY_IN_WATCHLIST",
+  "detail": "Movie with id 1 is already in user's watchlist"
+}
+```
+
+## Flask UGC service
+
+Flask-сервис находится в папке `flask_service/` и отвечает за пользовательский контент.
+
+### Запуск Flask
+
+Из корня проекта:
+
+```bash
+python -m flask_service.app
+```
+
+По умолчанию сервис запускается на порту `8002`.
+
+Healthcheck:
+
+```text
+http://127.0.0.1:8002/health
+```
+
+### UGC-модель
+
+UGC-запись содержит:
+
+| Поле | Описание |
+|---|---|
+| `id` | ID записи. |
+| `type` | Тип: `review`, `comment`, `rating`. |
+| `text` | Текст отзыва или комментария. |
+| `rating` | Оценка от 1 до 10. |
+| `status` | Статус: `pending`, `active`, `hidden`. |
+| `movie_id` | ID фильма из Django. |
+| `user_id` | ID пользователя из JWT. |
+| `created_at` | Дата создания. |
+
+### Flask endpoints
+
+```http
+GET   /health
+POST  /ugc/
+GET   /ugc/?movie_id={id}
+GET   /ugc/moderation/
+PATCH /ugc/{ugc_id}/status
+PATCH /ugc/{ugc_id}/hide
+```
+
+Публичный список `GET /ugc/?movie_id={id}` возвращает только записи со статусом `active`.
+
+Создание UGC требует JWT access token:
+
+```bash
+curl -X POST http://127.0.0.1:8002/ugc/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{"type":"review","text":"Хороший фильм","rating":8,"movie_id":1}'
+```
+
+Перед созданием UGC Flask проверяет фильм через Django API:
+
+```text
+GET http://127.0.0.1:8000/api/movies/{movie_id}/
+```
+
+Если Django недоступен, сервис возвращает ошибку `DJANGO_SERVICE_UNAVAILABLE`.
+
+Модераторские endpoint-ы требуют роль `admin` или `moderator` в JWT:
+
+```http
+GET /ugc/moderation/
+PATCH /ugc/{ugc_id}/status
+```
+
+Пользователь может скрыть собственный UGC через:
+
+```http
+PATCH /ugc/{ugc_id}/hide
+```
+
+## FastAPI service
+
+FastAPI-сервис находится в папке `fastapi_service/`.
+
+### Запуск FastAPI
+
+Из папки `fastapi_service/`:
+
+```bash
 uvicorn main:app --reload --port 8001
 ```
 
-Документация Swagger UI:
+Документация OpenAPI:
 
 ```text
 http://127.0.0.1:8001/docs
@@ -781,64 +300,17 @@ Healthcheck:
 http://127.0.0.1:8001/health
 ```
 
-### 8.4. Запуск Flask
+### FastAPI endpoints
 
-В отдельном терминале:
+Подключены основные роуты:
 
-```bash
-cd flask_service
-pip install -r requirements.txt
-python app.py
+```http
+GET  /health
+POST /auth/register
+POST /auth/login
+POST /auth/refresh
+POST /watchlist/
 ```
-
-По умолчанию Flask запускается на порту `8002`.
-
-Healthcheck:
-
-```text
-http://127.0.0.1:8002/health
-```
-
----
-
-## 9. Примеры ручной проверки
-
-### 9.1. Проверить Django movies
-
-```bash
-curl http://127.0.0.1:8000/api/movies/
-```
-
-С фильтром по жанру:
-
-```bash
-curl "http://127.0.0.1:8000/api/movies/?genre=action"
-```
-
-С поиском:
-
-```bash
-curl "http://127.0.0.1:8000/api/movies/?search=matrix"
-```
-
-### 9.2. Добавить фильм в Django watchlist
-
-Пример с basic auth:
-
-```bash
-curl -u testuser:password \
-  -X POST http://127.0.0.1:8000/api/watchlist/ \
-  -H "Content-Type: application/json" \
-  -d '{"movie": 1}'
-```
-
-Посмотреть watchlist:
-
-```bash
-curl -u testuser:password http://127.0.0.1:8000/api/watchlist/
-```
-
-### 9.3. Проверить FastAPI auth
 
 Регистрация:
 
@@ -856,7 +328,7 @@ curl -X POST http://127.0.0.1:8001/auth/login \
   -d '{"email":"student@example.com","password":"qwerty123"}'
 ```
 
-Запрос к защищённому endpoint:
+Защищённый endpoint watchlist:
 
 ```bash
 curl -X POST http://127.0.0.1:8001/watchlist/ \
@@ -865,50 +337,130 @@ curl -X POST http://127.0.0.1:8001/watchlist/ \
   -d '{"movie_id":1}'
 ```
 
-### 9.4. Проверить Flask UGC
+`POST /watchlist/` демонстрирует защищённый async endpoint и background task. Запись в Django-базу при этом не создаётся.
 
-Создать отзыв:
+В папке `fastapi_service/routers/` также есть роутеры для фильмов и рекомендаций. Для использования их нужно подключить в `fastapi_service/main.py` через `app.include_router(...)`.
 
-```bash
-curl -X POST http://127.0.0.1:8002/ugc/ \
-  -H "Content-Type: application/json" \
-  -d '{"type":"review","text":"Хороший фильм","rating":8,"movie_id":1}'
-```
+## Взаимодействие сервисов
 
-Сделать отзыв активным:
+### Flask -> Django
 
-```bash
-curl -X PATCH http://127.0.0.1:8002/ugc/1/status \
-  -H "Content-Type: application/json" \
-  -d '{"status":"active"}'
-```
-
-Получить активные отзывы фильма:
-
-```bash
-curl "http://127.0.0.1:8002/ugc/?movie_id=1"
-```
-
----
-
----
-
-## 10. Логирование
-
-В FastAPI и Flask настроен стандартный Python `logging`.
-
-Формат логов:
+При создании UGC Flask обращается к Django API, чтобы проверить существование фильма:
 
 ```text
-17:32:01 [INFO] routers.auth_router: Пользователь вошёл: test@example.com
+Flask /ugc/
+  -> Django /api/movies/{movie_id}/
 ```
 
-Логируются:
+### Django -> FastAPI
 
-- регистрация пользователя;
-- вход пользователя;
-- неудачные попытки входа;
-- добавление в FastAPI watchlist;
-- notify-события от Django;
-- запуск и завершение фоновой задачи;
-- недоступность Django или FastAPI при межсервисных запросах.
+В `services/watchlist_service.py` после добавления фильма в watchlist есть интеграционный вызов через `services/integration_service.py`. Ошибка внешнего сервиса не должна ломать основной Django-сценарий: watchlist создаётся в Django, а проблема интеграции фиксируется в логах.
+
+### FastAPI -> Django
+
+В `fastapi_service/clients/django_client.py` подготовлен async-клиент для обращения к Django API. Он используется роутерами фильмов и рекомендаций после их подключения в `main.py`.
+
+## Тесты
+
+В проекте есть тесты для Django API, сервисного слоя и Flask-сервиса:
+
+```text
+api/tests/
+services/tests/
+flask_service/tests/
+```
+
+Запуск всех тестов из корня проекта:
+
+```bash
+pytest
+```
+
+Запуск конкретного файла:
+
+```bash
+pytest services/tests/test_watchlist_service.py
+```
+
+Запуск одного теста:
+
+```bash
+pytest services/tests/test_watchlist_service.py::test_add_to_watchlist
+```
+
+Если тесты запускаются в новом окружении, сначала нужно установить зависимости:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Проверка вручную
+
+Обычно удобно запускать сервисы в трёх терминалах.
+
+Терминал 1, Django:
+
+```bash
+python manage.py runserver 8000
+```
+
+Терминал 2, FastAPI:
+
+```bash
+cd fastapi_service
+uvicorn main:app --reload --port 8001
+```
+
+Терминал 3, Flask:
+
+```bash
+python -m flask_service.app
+```
+
+После этого можно проверить:
+
+```bash
+curl http://127.0.0.1:8000/api/movies/
+curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:8002/health
+```
+
+## Логирование
+
+В сервисах используется стандартный Python `logging`. Логируются основные события:
+
+- регистрация и вход пользователя в FastAPI;
+- ошибки JWT;
+- добавление фильма в FastAPI watchlist;
+- создание и модерация UGC;
+- недоступность Django или FastAPI при межсервисных вызовах.
+
+## Что не хранить в репозитории
+
+В репозиторий не нужно добавлять временные и служебные файлы:
+
+```text
+__pycache__/
+.pytest_cache/
+.coverage
+*.log
+errors.txt
+db.sqlite3
+*.sqlite3
+.env
+```
+
+Такие файлы относятся к локальному окружению, тестам или временной отладке и не нужны для запуска проекта другим разработчиком.
+
+## Текущий статус
+
+Проект покрывает основные учебные части:
+
+| Часть | Где реализовано |
+|---|---|
+| Django ORM, admin, DRF API | `domain/`, `movies/`, `api/` |
+| Service layer | `services/` |
+| Доменные ошибки и единый формат ошибок | `domain/exceptions.py`, `api/exception_handler.py` |
+| Flask UGC | `flask_service/` |
+| FastAPI auth, JWT, async endpoint, background task | `fastapi_service/` |
+| Интеграция сервисов по HTTP | `services/integration_service.py`, `flask_service/integrations.py`, `fastapi_service/clients/` |

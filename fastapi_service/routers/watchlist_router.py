@@ -27,14 +27,3 @@ async def add_to_watchlist(
             "movie_id": data.movie_id
         }
     }
-
-
-# @router.post("/notify")
-# async def notify(data: WatchlistNotifyRequest):
-#     logger.info(f"[notify] Django сообщил: user={data.user_id}, movie={data.movie_id}")
-#     return {
-#         "success": True,
-#         "data": {
-#             "status": "received"
-#         }
-#     }

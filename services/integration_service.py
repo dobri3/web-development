@@ -17,11 +17,7 @@ async def check_movie_exists(movie_id):
 
 
 def notify_fastapi_watchlist_added(user_id: int, movie_id: int):
-    """Notify FastAPI service that a movie was added to a watchlist.
-
-    Kept as a small integration wrapper so tests and service code can patch the
-    external boundary without touching domain logic.
-    """
+    """Уведомляет FastAPI о добавлении фильма в watchlist""" 
     return httpx.post(
         f"{settings.FASTAPI_SERVICE_URL}/watchlist/notify",
         json={"user_id": user_id, "movie_id": movie_id},
