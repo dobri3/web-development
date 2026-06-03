@@ -1,12 +1,23 @@
 import os
 from datetime import datetime, timezone
 import logging
-from integrations import check_movie_exists
+from flask_migrate import Migrate
+from werkzeug.exceptions import HTTPException
+from .integrations import check_movie_exists
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, request, g
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint
-from validation import validate_ugc_payload, validate_movie_id_query, validate_status_payload
+from .validation import (
+    validate_ugc_payload,
+    validate_movie_id_query,
+    validate_status_payload,
+    validate_optional_positive_int_query,
+    validate_optional_status_query,
+)
+from .auth import jwt_required
+from .permissions import roles_required
+from .responses import success_response, error_response
 
 load_dotenv()
 logging.basicConfig(
@@ -16,6 +27,7 @@ logging.basicConfig(
 )
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 
 class UGC(db.Model):
@@ -23,10 +35,11 @@ class UGC(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     type = db.Column(db.String(20), nullable=False)
-    text = db.Column(db.Text, nullable=False)
-    rating = db.Column(db.Float, nullable=False)
+    text = db.Column(db.Text)
+    rating = db.Column(db.Float)
     status = db.Column(db.String(20), nullable=False, default="pending")
     movie_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -36,7 +49,7 @@ class UGC(db.Model):
     __table_args__ = (
         CheckConstraint("type IN ('review', 'comment', 'rating')", name="check_ugc_type"),
         CheckConstraint("status IN ('active', 'hidden', 'pending')", name="check_ugc_status"),
-        CheckConstraint("rating >= 1 AND rating <= 10", name="check_ugc_rating"),
+        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 10)", name="check_ugc_rating"),
     )
 
     def to_dict(self) -> dict:
@@ -50,13 +63,16 @@ class UGC(db.Model):
             "rating": self.rating,
             "status": self.status,
             "movie_id": self.movie_id,
+            "user_id": self.user_id,
             "created_at": created_at.isoformat().replace("+00:00", "Z"),
         }
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+
     app.json.ensure_ascii = False
+
     app.config["SQLALCHEMY_DATABASE_URI"] = (
         os.getenv("FLASK_DATABASE_URL")
         or os.getenv("DATABASE_URL")
@@ -65,66 +81,156 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        db.create_all()
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(error: HTTPException):
+        return error_response(
+            error.name.upper().replace(" ", "_"),
+            error.description,
+            error.code or 500,
+        )
 
     @app.route("/health", methods=["GET"])
     def health_check():
-        return jsonify({"status": "ok"}), 200
+        return success_response({"status": "ok"}, 200)
 
     @app.route("/ugc/", methods=["POST"])
+    @jwt_required
     def create_ugc():
         data = request.get_json(silent=True)
         validated_data, error = validate_ugc_payload(data)
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         exists, django_available = check_movie_exists(validated_data["movie_id"])
-        if django_available and not exists:
-            return jsonify({
-                "error": "MOVIE_NOT_FOUND",
-                "detail": f"Movie with id {validated_data['movie_id']} not found"
-            }), 404
+
+        if not django_available:
+            return error_response(
+                "DJANGO_SERVICE_UNAVAILABLE",
+                "Cannot verify movie existence. Try again later.",
+                503,
+            )
+
+        if not exists:
+            return error_response(
+                "MOVIE_NOT_FOUND",
+                f"Movie with id {validated_data['movie_id']} not found",
+                404,
+            )
 
         ugc = UGC(
             type=validated_data["type"],
             text=validated_data["text"],
             rating=validated_data["rating"],
             movie_id=validated_data["movie_id"],
+            user_id=g.current_user["id"],
             status="pending",
         )
         db.session.add(ugc)
         db.session.commit()
-        return jsonify({"data": ugc.to_dict()}), 201
+        return success_response(ugc.to_dict(), 201)
 
     @app.route("/ugc/", methods=["GET"])
     def list_active_ugc():
         movie_id, error = validate_movie_id_query(request.args.get("movie_id"))
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         ugc_items = (
             UGC.query.filter_by(movie_id=movie_id, status="active")
             .order_by(UGC.created_at.desc())
             .all()
         )
-        return jsonify({"data": [ugc.to_dict() for ugc in ugc_items]}), 200
+        return success_response([ugc.to_dict() for ugc in ugc_items], 200)
+
+    @app.route("/ugc/moderation/", methods=["GET"])
+    @jwt_required
+    @roles_required("admin", "moderator")
+    def list_ugc_for_moderation():
+        movie_id, error = validate_optional_positive_int_query(
+            request.args.get("movie_id"),
+            "movie_id",
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        user_id, error = validate_optional_positive_int_query(
+            request.args.get("user_id"),
+            "user_id",
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        status, error = validate_optional_status_query(
+            request.args.get("status")
+        )
+        if error:
+            return error_response(error["error"], error["detail"], 400)
+
+        query = UGC.query
+
+        if movie_id is not None:
+            query = query.filter_by(movie_id=movie_id)
+
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+
+        if status is not None:
+            query = query.filter_by(status=status)
+
+        ugc_items = query.order_by(UGC.created_at.desc()).all()
+
+        return success_response(
+            [ugc.to_dict() for ugc in ugc_items],
+            200,
+        )
 
     @app.route("/ugc/<int:ugc_id>/status", methods=["PATCH"])
+    @jwt_required
+    @roles_required("admin", "moderator")
     def update_ugc_status(ugc_id):
         ugc = db.session.get(UGC, ugc_id)
         if ugc is None:
-            return jsonify({"error": "NOT_FOUND", "detail": f"UGC with id {ugc_id} not found"}), 404
+            return error_response(
+                "UGC_NOT_FOUND",
+                f"UGC with id {ugc_id} not found",
+                404,
+            )
 
         data = request.get_json(silent=True)
         status, error = validate_status_payload(data)
         if error:
-            return jsonify(error), 400
+            return error_response(error["error"], error["detail"], 400)
 
         ugc.status = status
         db.session.commit()
-        return jsonify({"data": ugc.to_dict()}), 200
+        return success_response(ugc.to_dict(), 200)
+    @app.route("/ugc/<int:ugc_id>/hide", methods=["PATCH"])
+    @jwt_required
+    def hide_own_ugc(ugc_id):
+        ugc = db.session.get(UGC, ugc_id)
+
+        if ugc is None:
+            return error_response(
+                "UGC_NOT_FOUND",
+                "UGC item not found",
+                404,
+            )
+
+        current_user_id = g.current_user["id"]
+
+        if ugc.user_id != current_user_id:
+            return error_response(
+                "FORBIDDEN",
+                "You can hide only your own UGC",
+                403,
+            )
+
+        ugc.status = "hidden"
+        db.session.commit()
+
+        return success_response(ugc.to_dict(), 200)
 
     return app
 

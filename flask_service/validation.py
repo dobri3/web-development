@@ -21,20 +21,6 @@ def validate_ugc_payload(data: dict):
     rating = data.get("rating")
     movie_id = data.get("movie_id")
 
-    if text is None or not isinstance(text, str) or not text.strip():
-        return None, validation_error("text cannot be empty")
-
-    if len(text) > 1000:
-        return None, validation_error(
-            "text cannot be longer than 1000 characters"
-        )
-
-    if not is_number(rating):
-        return None, validation_error("rating must be a number from 1 to 10")
-
-    if rating < 1 or rating > 10:
-        return None, validation_error("rating must be a number from 1 to 10")
-
     if ugc_type not in ALLOWED_UGC_TYPES:
         return None, validation_error(
             "type must be one of: review, comment, rating"
@@ -42,7 +28,6 @@ def validate_ugc_payload(data: dict):
 
     if movie_id is None:
         return None, validation_error("movie_id is required")
-
 
     if not isinstance(movie_id, int) or isinstance(movie_id, bool):
         return None, validation_error("movie_id must be a number")
@@ -52,10 +37,36 @@ def validate_ugc_payload(data: dict):
 
     validated_data = {
         "type": ugc_type,
-        "text": text.strip(),
-        "rating": rating,
         "movie_id": movie_id,
+        "text": None,
+        "rating": None,
     }
+
+    if ugc_type == "comment" or ugc_type == "review":
+        if text is None or not isinstance(text, str) or not text.strip():
+            return None, validation_error("text cannot be empty")
+
+        if len(text.strip()) > 1000:
+            return None, validation_error("text cannot be longer than 1000 characters")
+
+        if ugc_type == "comment":
+            if rating is not None:
+                return None, validation_error("comment must not contain rating")
+
+        validated_data["text"] = text.strip()
+
+    if ugc_type == "rating" or ugc_type == "review":
+        if not is_number(rating):
+            return None, validation_error("rating must be a number from 1 to 10")
+
+        if rating < 1 or rating > 10:
+            return None, validation_error("rating must be a number from 1 to 10")
+
+        if ugc_type == "rating":
+            if text is not None:
+                return None, validation_error("rating must not contain text")
+
+        validated_data["rating"] = rating
 
     return validated_data, None
 
@@ -88,3 +99,29 @@ def validate_status_payload(data):
         return None, validation_error("status must be one of: active, hidden, pending")
 
     return status, None
+
+def validate_optional_positive_int_query(raw_value: str | None, field_name: str):
+    if raw_value is None:
+        return None, None
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, validation_error(f"{field_name} must be a number")
+
+    if value <= 0:
+        return None, validation_error(f"{field_name} must be a positive number")
+
+    return value, None
+
+
+def validate_optional_status_query(raw_status: str | None):
+    if raw_status is None:
+        return None, None
+
+    if raw_status not in ALLOWED_STATUSES:
+        return None, validation_error(
+            "status must be one of: active, hidden, pending"
+        )
+
+    return raw_status, None
