@@ -5,6 +5,11 @@ class DomainError(Exception):
     """Базовое доменное исключение"""
     status_code = 400
     error_code = "DOMAIN_ERROR"
+    def __init__(self, detail):
+
+        self.detail = detail
+
+        super().__init__(detail)
 
 
 class MovieNotFound(DomainError):
@@ -118,3 +123,21 @@ class SubscriptionAlreadyInactive(DomainError):
     def __init__(self, username: str):
         self.username = username
         super().__init__(f"Subscription for user {username} is already inactive")
+
+class InvalidSubscriptionDuration(DomainError):
+    status_code = 400
+    error_code = "INVALID_SUBSCRIPTION_DURATION"
+
+    def __init__(self):
+        super().__init__(
+            "Subscription duration must be positive."
+        )
+
+class DuplicateGenreError(DomainError):
+    status_code = 400
+    error_code = "DUPLICATE_GENRE"
+
+    def __init__(self, genre):
+        super().__init__(
+            f"Genre '{genre}' already exists."
+        )

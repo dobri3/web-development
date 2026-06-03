@@ -81,6 +81,12 @@ class MovieAPITests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.data["success"])
 
+    def test_too_old_release_year_returns_400(self):
+        response = self.client.get("/api/movies/", {"release_year": 1000})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data["success"])
+
 
 class WatchlistAPITests(TestCase):
 

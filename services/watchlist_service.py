@@ -41,3 +41,11 @@ def remove_from_watchlist(user, movie_id: int) -> None:
 
     if deleted_count == 0:
         raise WatchlistItemNotFound(movie_id, user.username)
+    
+def get_user_watchlist(user):
+    return (
+        Watchlist.objects
+        .filter(user=user)
+        .select_related("movie")
+        .order_by("-added_at")
+    )

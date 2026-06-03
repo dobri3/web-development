@@ -51,3 +51,4 @@ def custom_exception_handler(exc, context):
     }
 
     return Response(response_body, status=response.status_code)
+
