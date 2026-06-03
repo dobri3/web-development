@@ -18,6 +18,7 @@ class Movie(models.Model):
 class Subscription(models.Model):
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE)
     expires_at = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.user} - expires at {self.expires_at}"

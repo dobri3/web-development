@@ -1,7 +1,7 @@
 from django.db import transaction
-from django.conf import settings
 from domain.models import Movie, Watchlist
 from domain.exceptions import MovieNotFound, AlreadyInWatchlist, WatchlistItemNotFound
+from services import integration_service
 import httpx
 import logging
 
@@ -20,10 +20,9 @@ def add_to_watchlist(user, movie_id: int) -> Watchlist:
     watchlist_item = Watchlist.objects.create(user=user, movie=movie)
 
     try:
-        response = httpx.post(
-            f"{settings.FASTAPI_SERVICE_URL}/watchlist/notify",
-            json={"user_id": user.id, "movie_id": movie_id},
-            timeout=2.0
+        response = integration_service.notify_fastapi_watchlist_added(
+            user_id=user.id,
+            movie_id=movie_id,
         )
         logger.info(f"FastAPI уведомлён: user={user.id}, movie={movie_id}, status={response.status_code}")
     except httpx.RequestError as e:

@@ -14,9 +14,12 @@ def get_user_subscription(user):
 
 
 def get_user_active_subscription(user):
-    subscription = get_user_subscription(user)
+    try:
+        subscription = get_user_subscription(user)
+    except SubscriptionNotFound:
+        raise ActiveSubscriptionNotFound(user.username)
 
-    if subscription.expires_at > timezone.now():
+    if subscription.is_active and subscription.expires_at > timezone.now():
         return subscription
 
     raise ActiveSubscriptionNotFound(user.username)
@@ -32,14 +35,16 @@ def create_or_extend_subscription(user, duration_days=30):
         return Subscription.objects.create(
             user=user,
             expires_at=now + timedelta(days=duration_days),
+            is_active=True,
         )
 
-    if subscription.expires_at > now:
+    if subscription.is_active and subscription.expires_at > now:
         subscription.expires_at += timedelta(days=duration_days)
     else:
         subscription.expires_at = now + timedelta(days=duration_days)
 
-    subscription.save(update_fields=["expires_at"])
+    subscription.is_active = True
+    subscription.save(update_fields=["expires_at", "is_active"])
 
     return subscription
 
@@ -48,6 +53,7 @@ def cancel_subscription(user):
     subscription = get_user_subscription(user)
 
     subscription.expires_at = timezone.now()
-    subscription.save(update_fields=["expires_at"])
+    subscription.is_active = False
+    subscription.save(update_fields=["expires_at", "is_active"])
 
     return subscription
